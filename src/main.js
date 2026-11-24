@@ -52,8 +52,8 @@ const AgXContrastShader = {
         vec3 centered = c - vec3(0.48);
         c = clamp(centered * uContrast + vec3(0.48), 0.0, 1.0);
 
-        // Gentle filmic shoulder curve to keep deep darks & crisp specular pop
-        c = mix(c, c * c * (3.0 - 2.0 * c), 0.16);
+        // Gentle filmic shoulder curve (balanced — no burnt shadows/highlights)
+        c = mix(c, c * c * (3.0 - 2.0 * c), 0.07);
 
         // Slight saturation lift matching AgX Very High Contrast
         float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
@@ -67,51 +67,51 @@ const AgXContrastShader = {
 
 const STUDIO_PROFILES = {
   dark: {
-    exposure: 0.86,
-    envIntensity: 1.0,
-    keyLightIntensity: 0.55,
-    rimLightIntensity: 0.45,
-    cabinLightIntensity: 1.8,
+    exposure: 0.9,
+    envIntensity: 1.02,
+    keyLightIntensity: 0.42,
+    rimLightIntensity: 0.35,
+    cabinLightIntensity: 1.2,
     bloomEnabled: true,
     bloomThreshold: 4.2,
     bloomStrength: 0.022, // Whisper-subtle optical glint — no hazy fog!
     bloomRadius: 0.14,
-    contrast: 1.24,
-    shadowToe: 0.045,
-    saturation: 1.08,
+    contrast: 1.11,
+    shadowToe: 0.018,
+    saturation: 1.03,
     materials: {
       'METALLIC CARPAINT - columbia blue': {
-        base: [0.065, 0.074, 0.09], // Deeper sculptural metallic core for high contrast
-        highlight: [0.84, 0.89, 0.96],
-        metalness: 0.96,
-        roughness: 0.15, // Crisp liquid-metal automotive reflections
-        clearcoat: 1.0,
-        clearcoatRoughness: 0.02,
-      },
-      'SATIN METALLIC CARPAINT - lava': {
-        base: [0.24, 0.007, 0.0015], // Deep rich metallic crimson core
-        highlight: [0.88, 0.36, 0.24],
-        metalness: 0.92,
+        base: [0.11, 0.12, 0.14], // Balanced sculptural metallic (no burnt shadows)
+        highlight: [0.86, 0.9, 0.96],
+        metalness: 0.93,
         roughness: 0.19,
         clearcoat: 0.9,
         clearcoatRoughness: 0.03,
       },
+      'SATIN METALLIC CARPAINT - lava': {
+        base: [0.3, 0.01, 0.002],
+        highlight: [0.85, 0.45, 0.35],
+        metalness: 0.91,
+        roughness: 0.22,
+        clearcoat: 0.85,
+        clearcoatRoughness: 0.035,
+      },
       'HYPE_METALLIC CARPAINT - grey': {
         color: [0.76, 0.8, 0.86],
         metalness: 1.0,
-        roughness: 0.11,
+        roughness: 0.12,
       },
       'SATIN METALLIC CARPAINT - anthracite': {
-        color: [0.008, 0.009, 0.012],
-        metalness: 0.6,
-        roughness: 0.22,
+        color: [0.009, 0.01, 0.013],
+        metalness: 0.55,
+        roughness: 0.24,
       },
       'GLASS - windshield': {
-        color: [0.08, 0.11, 0.15],
-        metalness: 0.06,
-        roughness: 0.015,
-        opacity: 0.26,
-        envMapIntensity: 1.55,
+        color: [0.008, 0.01, 0.015], // Deep dark smoked tint
+        metalness: 0.08,
+        roughness: 0.018,
+        opacity: 0.82, // 82% opacity — dark tinted while subtly revealing interior
+        envMapIntensity: 1.45,
       },
       'odi_LIGHT_front_v1.1': {
         emissiveIntensity: 3.6,
@@ -123,51 +123,51 @@ const STUDIO_PROFILES = {
     },
   },
   white: {
-    exposure: 0.95,
-    envIntensity: 1.15,
-    keyLightIntensity: 1.45,
-    rimLightIntensity: 0.65,
-    cabinLightIntensity: 2.6,
+    exposure: 0.94,
+    envIntensity: 1.12,
+    keyLightIntensity: 1.35,
+    rimLightIntensity: 0.5,
+    cabinLightIntensity: 1.8,
     bloomEnabled: false,
     bloomThreshold: 5.0,
     bloomStrength: 0.0,
     bloomRadius: 0.1,
-    contrast: 1.2,
-    shadowToe: 0.035,
-    saturation: 1.08,
+    contrast: 1.09,
+    shadowToe: 0.015,
+    saturation: 1.03,
     materials: {
       'METALLIC CARPAINT - columbia blue': {
-        base: [0.11, 0.15, 0.23], // Deep cool steel-blue core contrasting against bright horizon
-        highlight: [0.9, 0.94, 1.0],
-        metalness: 0.94,
-        roughness: 0.15,
-        clearcoat: 1.0,
-        clearcoatRoughness: 0.02,
-      },
-      'SATIN METALLIC CARPAINT - lava': {
-        base: [0.26, 0.008, 0.0015],
-        highlight: [0.9, 0.38, 0.26],
-        metalness: 0.92,
+        base: [0.18, 0.23, 0.32], // Crisp cool silver-blue without burnt contrast
+        highlight: [0.89, 0.93, 0.99],
+        metalness: 0.9,
         roughness: 0.19,
         clearcoat: 0.9,
         clearcoatRoughness: 0.03,
       },
+      'SATIN METALLIC CARPAINT - lava': {
+        base: [0.31, 0.011, 0.002],
+        highlight: [0.86, 0.48, 0.38],
+        metalness: 0.9,
+        roughness: 0.22,
+        clearcoat: 0.85,
+        clearcoatRoughness: 0.035,
+      },
       'HYPE_METALLIC CARPAINT - grey': {
         color: [0.78, 0.83, 0.89],
         metalness: 1.0,
-        roughness: 0.09,
+        roughness: 0.1,
       },
       'SATIN METALLIC CARPAINT - anthracite': {
         color: [0.006, 0.007, 0.01],
-        metalness: 0.45,
-        roughness: 0.2,
+        metalness: 0.4,
+        roughness: 0.22,
       },
       'GLASS - windshield': {
-        color: [0.1, 0.14, 0.2],
-        metalness: 0.05,
-        roughness: 0.014,
-        opacity: 0.28,
-        envMapIntensity: 1.4,
+        color: [0.008, 0.01, 0.016], // Deep dark smoked tint
+        metalness: 0.06,
+        roughness: 0.016,
+        opacity: 0.83, // 83% opacity — dark tinted while subtly revealing interior
+        envMapIntensity: 1.35,
       },
       'odi_LIGHT_front_v1.1': {
         emissiveIntensity: 4.5,
@@ -859,16 +859,17 @@ async function initAssets() {
           attachBlenderFresnelPaint(mat, prof.base, prof.highlight);
         }
 
-        // Lightly smoked transparent automotive glass so interior cockpit & seats are clearly visible!
+        // Dark-tinted smoked automotive glass (82–83% opacity) so cockpit subtly reads through
         if (mat.name === 'GLASS - windshield' || mat.name === 'odi_GLASS_reflection_v1.1') {
           isGlassMesh = true;
           mat.transparent = true;
-          mat.opacity = 0.26;
-          mat.roughness = 0.015;
-          mat.metalness = 0.06;
+          mat.opacity = 0.82;
+          mat.color.setRGB(0.008, 0.01, 0.015);
+          mat.roughness = 0.018;
+          mat.metalness = 0.08;
           if ('clearcoat' in mat) {
             mat.clearcoat = 1.0;
-            mat.clearcoatRoughness = 0.01;
+            mat.clearcoatRoughness = 0.012;
           }
           if ('ior' in mat) mat.ior = 1.52;
           if ('reflectivity' in mat) mat.reflectivity = 1.0;
