@@ -690,16 +690,15 @@ function updateRearHaloVisibility() {
     1.0
   );
   const isDark = currentStudio === 'dark';
-  const haloPeak = isDark ? 0.52 : 0.55;
+  const haloPeak = isDark ? 0.26 : 0.27;
 
   for (const sp of rearHaloSprites) {
     sp.visible = rearViewFactor > 0.01;
     sp.material.blending = isDark ? THREE.AdditiveBlending : THREE.NormalBlending;
-    // In Dark Studio boost linear RGB above 1.0 so HDR UnrealBloomPass amplifies the crimson halo!
     if (isDark) {
-      sp.material.color.setRGB(3.5, 0.06, 0.02);
+      sp.material.color.setRGB(1.8, 0.04, 0.015);
     } else {
-      sp.material.color.setRGB(1.15, 0.04, 0.02);
+      sp.material.color.setRGB(1.1, 0.04, 0.02);
     }
     sp.material.opacity = haloPeak * glow * rearViewFactor * sp.userData.mult;
   }
@@ -712,52 +711,51 @@ function updateRearLampBloom(progress) {
   lastRearGlow = glow;
   const isDark = currentStudio === 'dark';
 
-  // 1. Dramatic standby -> full airbrake surge on rear red LEDs (odi_LIGHT_rear_v1.1)
+  // 1. Standby -> airbrake surge on rear red LEDs (odi_LIGHT_rear_v1.1)
   const rearLedMat = namedMaterials.get('odi_LIGHT_rear_v1.1');
   if (rearLedMat) {
     if (isDark) {
       rearLedMat.color.setRGB(THREE.MathUtils.lerp(0.18, 0.85, glow), 0.0, 0.0);
       rearLedMat.emissive.setRGB(
         1.0,
-        THREE.MathUtils.lerp(0.005, 0.065, glow),
-        THREE.MathUtils.lerp(0.0, 0.02, glow)
+        THREE.MathUtils.lerp(0.005, 0.05, glow),
+        THREE.MathUtils.lerp(0.0, 0.015, glow)
       );
-      rearLedMat.emissiveIntensity = THREE.MathUtils.lerp(0.45, 85.0, glow);
+      rearLedMat.emissiveIntensity = THREE.MathUtils.lerp(0.45, 45.0, glow);
     } else {
       rearLedMat.color.setRGB(THREE.MathUtils.lerp(0.22, 0.9, glow), 0.0, 0.0);
       rearLedMat.emissive.setRGB(
         1.0,
-        THREE.MathUtils.lerp(0.005, 0.08, glow),
-        THREE.MathUtils.lerp(0.0, 0.025, glow)
+        THREE.MathUtils.lerp(0.005, 0.06, glow),
+        THREE.MathUtils.lerp(0.0, 0.02, glow)
       );
-      rearLedMat.emissiveIntensity = THREE.MathUtils.lerp(0.55, 48.0, glow);
+      rearLedMat.emissiveIntensity = THREE.MathUtils.lerp(0.55, 28.0, glow);
     }
   }
 
-  // 2. Blaze the outer translucent red lens housing (LIGHT LENS PLASTIC - red)
+  // 2. Illuminate the outer translucent red lens housing (LIGHT LENS PLASTIC - red)
   const rearLensMat = namedMaterials.get('LIGHT LENS PLASTIC - red');
   if (rearLensMat && rearLensMat.emissive) {
-    rearLensMat.emissive.setRGB(1.0, 0.014, 0.004);
-    rearLensMat.emissiveIntensity = THREE.MathUtils.lerp(0.0, isDark ? 16.0 : 8.5, glow);
+    rearLensMat.emissive.setRGB(1.0, 0.012, 0.003);
+    rearLensMat.emissiveIntensity = THREE.MathUtils.lerp(0.0, isDark ? 8.0 : 4.5, glow);
   }
 
-  // 3. Surgical High-Threshold HDR Bloom in Dark Studio
-  //    Threshold rises to 6.5 so ONLY the blazing 85.0 red lamps & 16.0 red lens bloom richly!
+  // 3. Controlled HDR Bloom in Dark Studio (50% reduced — crisp red glow without overpower)
   if (isDark) {
     bloomPass.threshold = THREE.MathUtils.lerp(4.0, 6.5, glow);
-    bloomPass.strength = THREE.MathUtils.lerp(0.024, 0.42, glow);
-    bloomPass.radius = THREE.MathUtils.lerp(0.14, 0.72, glow);
+    bloomPass.strength = THREE.MathUtils.lerp(0.024, 0.21, glow);
+    bloomPass.radius = THREE.MathUtils.lerp(0.14, 0.44, glow);
   }
 
-  // 4. Vivid crimson bounce lights illuminating rear diffuser, bumper, and underside of open aero flaps
-  const bouncePeak = isDark ? 12.0 : 8.0;
+  // 4. Subtle crimson bounce lights on rear diffuser & open flaps (50% reduced)
+  const bouncePeak = isDark ? 6.5 : 4.5;
   for (const pl of rearBounceLights) {
     pl.intensity = bouncePeak * glow * pl.userData.mult;
   }
 
   // 5. Update feathered optical crimson bloom sprites
   for (const sp of rearHaloSprites) {
-    const scaleBoost = THREE.MathUtils.lerp(0.7, 1.22, glow);
+    const scaleBoost = THREE.MathUtils.lerp(0.7, 1.0, glow);
     const [bx, by, bz] = sp.userData.baseScale;
     sp.scale.set(bx * scaleBoost, by * scaleBoost, bz);
   }
