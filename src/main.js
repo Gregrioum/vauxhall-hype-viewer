@@ -124,8 +124,8 @@ const STUDIO_PROFILES = {
         emissiveIntensity: 3.8,
       },
       'odi_LIGHT_rear_v1.1': {
-        emissiveColor: [1.0, 0.006, 0.0],
-        emissiveIntensity: 4.2,
+        emissiveColor: [1.0, 0.008, 0.002],
+        emissiveIntensity: 2.4,
       },
     },
   },
@@ -187,8 +187,8 @@ const STUDIO_PROFILES = {
         emissiveIntensity: 4.5,
       },
       'odi_LIGHT_rear_v1.1': {
-        emissiveColor: [1.0, 0.004, 0.0],
-        emissiveIntensity: 2.8,
+        emissiveColor: [1.0, 0.006, 0.002],
+        emissiveIntensity: 1.8,
       },
     },
   },
@@ -360,10 +360,79 @@ const rimLight = new THREE.DirectionalLight(0xeef5ff, STUDIO_PROFILES.dark.rimLi
 rimLight.position.set(4.5, 4.2, -6.5);
 scene.add(rimLight);
 
-// Subtle cockpit interior fill light so the orange-gold/navy Alcantara seats & steering wheel read clearly through the glass
+// Subtle cockpit interior fill light
 const cabinLight = new THREE.PointLight(0xf5f7ff, STUDIO_PROFILES.dark.cabinLightIntensity, 3.4, 1.5);
 cabinLight.position.set(0.0, 0.92, 0.1);
 scene.add(cabinLight);
+
+// ============================================================================
+// Dynamic Rear Brake-Lamp Glow & Bloom Rig (activates as aero flaps open!)
+// ============================================================================
+function createRedGlowTexture() {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const cx = size / 2;
+  const g = ctx.createRadialGradient(cx, cx, 0, cx, cx, cx);
+  // Rich ruby-red exponential glow matching Cycles glare around rear LED bars
+  g.addColorStop(0.0, 'rgba(255, 68, 42, 0.95)');
+  g.addColorStop(0.18, 'rgba(255, 18, 12, 0.62)');
+  g.addColorStop(0.45, 'rgba(220, 6, 4, 0.24)');
+  g.addColorStop(0.75, 'rgba(180, 0, 0, 0.06)');
+  g.addColorStop(1.0, 'rgba(140, 0, 0, 0.0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+const rearGlowTexture = createRedGlowTexture();
+const rearBrakeGroup = new THREE.Group();
+scene.add(rearBrakeGroup);
+
+// 3 soft red bounce lights casting real crimson glow onto rear diffuser & open flaps
+const rearBounceLights = [
+  { pos: [0.0, 0.64, -2.92], mult: 1.0 },
+  { pos: [-0.72, 0.62, -2.54], mult: 0.75 },
+  { pos: [0.72, 0.62, -2.54], mult: 0.75 },
+].map(({ pos, mult }) => {
+  const pl = new THREE.PointLight(0xff0a06, 0, 3.4, 1.8);
+  pl.position.set(...pos);
+  pl.userData.mult = mult;
+  rearBrakeGroup.add(pl);
+  return pl;
+});
+
+// 5 feathered optical bloom sprites hugging the swept chevron rear tail-light arc
+// (depthTest=true so front views never bleed through the chassis!)
+const rearHaloSprites = [
+  { pos: [0.0, 0.65, -2.86], scale: [1.55, 0.78, 1], mult: 1.0 },
+  { pos: [-0.46, 0.635, -2.66], scale: [1.25, 0.68, 1], mult: 0.85 },
+  { pos: [0.46, 0.635, -2.66], scale: [1.25, 0.68, 1], mult: 0.85 },
+  { pos: [-0.84, 0.625, -2.38], scale: [1.0, 0.58, 1], mult: 0.72 },
+  { pos: [0.84, 0.625, -2.38], scale: [1.0, 0.58, 1], mult: 0.72 },
+].map(({ pos, scale, mult }) => {
+  const mat = new THREE.SpriteMaterial({
+    map: rearGlowTexture,
+    color: 0xff160e,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    depthTest: true,
+    blending: THREE.AdditiveBlending,
+  });
+  const sp = new THREE.Sprite(mat);
+  sp.position.set(...pos);
+  sp.scale.set(...scale);
+  sp.renderOrder = 4;
+  sp.userData.mult = mult;
+  sp.userData.baseScale = scale;
+  rearBrakeGroup.add(sp);
+  return sp;
+});
 
 // Dark Studio seamless pitch-black floor
 const darkFloor = new THREE.Mesh(
@@ -551,6 +620,70 @@ function applyStudio(studioName) {
 
   btnStudioDark.classList.toggle('active', studioName === 'dark');
   btnStudioWhite.classList.toggle('active', studioName === 'white');
+
+  // Re-sync rear lamp brightness & bloom to current aero flap state for the newly active studio
+  updateRearLampBloom(aeroProgress);
+}
+
+// ============================================================================
+// Dynamic Rear Brake-Lamp Brightness & Bloom (synced to aeroProgress 0 -> 1)
+// ============================================================================
+function updateRearLampBloom(progress) {
+  const p = THREE.MathUtils.clamp(progress, 0, 1);
+  // Smooth ease-in-out curve so lamps surge convincingly as the aero flaps lift
+  const glow = p * p * (3 - 2 * p);
+  const isDark = currentStudio === 'dark';
+
+  // 1. Boost rear red LED lamp material brightness (odi_LIGHT_rear_v1.1)
+  const rearLedMat = namedMaterials.get('odi_LIGHT_rear_v1.1');
+  if (rearLedMat) {
+    if (isDark) {
+      rearLedMat.emissive.setRGB(
+        1.0,
+        THREE.MathUtils.lerp(0.008, 0.022, glow),
+        THREE.MathUtils.lerp(0.002, 0.006, glow)
+      );
+      rearLedMat.emissiveIntensity = THREE.MathUtils.lerp(2.4, 34.0, glow);
+    } else {
+      rearLedMat.emissive.setRGB(
+        1.0,
+        THREE.MathUtils.lerp(0.006, 0.032, glow),
+        THREE.MathUtils.lerp(0.002, 0.012, glow)
+      );
+      rearLedMat.emissiveIntensity = THREE.MathUtils.lerp(1.8, 16.0, glow);
+    }
+  }
+
+  // 2. Illuminate the outer translucent red lens smoothly (LIGHT LENS PLASTIC - red)
+  const rearLensMat = namedMaterials.get('LIGHT LENS PLASTIC - red');
+  if (rearLensMat && rearLensMat.emissive) {
+    rearLensMat.emissive.setRGB(1.0, 0.008, 0.002);
+    rearLensMat.emissiveIntensity = THREE.MathUtils.lerp(0.0, isDark ? 3.0 : 2.2, glow);
+  }
+
+  // 3. Surgical HDR Bloom boost in Dark Studio (high threshold isolates the blazing 34.0 red lamps!)
+  if (isDark) {
+    bloomPass.threshold = THREE.MathUtils.lerp(4.0, 5.2, glow);
+    bloomPass.strength = THREE.MathUtils.lerp(0.024, 0.145, glow);
+    bloomPass.radius = THREE.MathUtils.lerp(0.14, 0.56, glow);
+  }
+
+  // 4. Real crimson bounce lights illuminating rear diffuser, bumper, and underside of open aero flaps
+  const bouncePeak = isDark ? 4.8 : 3.2;
+  for (const pl of rearBounceLights) {
+    pl.intensity = bouncePeak * glow * pl.userData.mult;
+  }
+
+  // 5. Feathered optical crimson bloom sprites (works seamlessly in BOTH Dark and White Studios!)
+  const haloPeak = isDark ? 0.36 : 0.48;
+  for (const sp of rearHaloSprites) {
+    sp.material.blending = isDark ? THREE.AdditiveBlending : THREE.NormalBlending;
+    sp.material.opacity = haloPeak * glow * sp.userData.mult;
+    const scaleBoost = THREE.MathUtils.lerp(0.75, 1.15, glow);
+    const [bx, by, bz] = sp.userData.baseScale;
+    sp.scale.set(bx * scaleBoost, by * scaleBoost, bz);
+    sp.visible = glow > 0.005;
+  }
 }
 
 // ============================================================================
@@ -571,6 +704,9 @@ function setAeroProgress(val) {
     }
     mixer.update(0);
   }
+
+  // Update rear red brake-lamp brightness & bloom in sync with aero flaps
+  updateRearLampBloom(aeroProgress);
 
   const pct = Math.round(aeroProgress * 100);
   aeroScrubber.value = (aeroProgress * 100).toFixed(1);
