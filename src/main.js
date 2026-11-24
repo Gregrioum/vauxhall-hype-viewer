@@ -377,94 +377,19 @@ darkFloor.rotation.x = -Math.PI / 2;
 darkFloor.position.y = -0.002;
 scene.add(darkFloor);
 
-// White Studio real-time shadow-catcher plane at Y = 0.0 (meets rubber tires flush!)
-const whiteShadowFloor = new THREE.Mesh(
-  new THREE.PlaneGeometry(36, 36),
-  new THREE.ShadowMaterial({
-    color: 0x0b1220,
-    opacity: 0.32,
-  })
-);
-whiteShadowFloor.rotation.x = -Math.PI / 2;
-whiteShadowFloor.position.y = 0.0;
-whiteShadowFloor.receiveShadow = true;
-whiteShadowFloor.visible = false;
-scene.add(whiteShadowFloor);
-
-// Soft studio under-chassis & 4-wheel contact AO shadow plane (matches WhiteStudio_ShadowCatcher_Mat)
-function createStudioShadowPlaneTexture() {
-  const w = 1024;
-  const h = 2048;
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, w, h);
-
-  // 1. Wide soft studio overhead penumbra (slightly offset toward rear-right like White_Sculpt_Key)
-  ctx.save();
-  ctx.translate(w * 0.53, h * 0.51);
-  ctx.scale(1.05, 1.92);
-  const gWide = ctx.createRadialGradient(0, 0, 40, 0, 0, 430);
-  gWide.addColorStop(0.0, 'rgba(14, 20, 32, 0.34)');
-  gWide.addColorStop(0.45, 'rgba(14, 20, 32, 0.20)');
-  gWide.addColorStop(0.75, 'rgba(14, 20, 32, 0.06)');
-  gWide.addColorStop(1.0, 'rgba(14, 20, 32, 0.0)');
-  ctx.fillStyle = gWide;
-  ctx.beginPath();
-  ctx.arc(0, 0, 430, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-
-  // 2. Tighter under-body chassis occlusion core
-  ctx.save();
-  ctx.translate(w * 0.5, h * 0.5);
-  ctx.scale(0.74, 1.72);
-  const gCore = ctx.createRadialGradient(0, 0, 30, 0, 0, 340);
-  gCore.addColorStop(0.0, 'rgba(8, 12, 20, 0.52)');
-  gCore.addColorStop(0.55, 'rgba(8, 12, 20, 0.30)');
-  gCore.addColorStop(0.85, 'rgba(8, 12, 20, 0.08)');
-  gCore.addColorStop(1.0, 'rgba(8, 12, 20, 0.0)');
-  ctx.fillStyle = gCore;
-  ctx.beginPath();
-  ctx.arc(0, 0, 340, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-
-  // 3. Dedicated crisp tire contact shadows at all 4 wheel footprints
-  const wheelCoords = [
-    [w * 0.26, h * 0.25], // Front-left
-    [w * 0.74, h * 0.25], // Front-right
-    [w * 0.27, h * 0.75], // Rear-left
-    [w * 0.73, h * 0.75], // Rear-right
-  ];
-  for (const [wx, wy] of wheelCoords) {
-    ctx.save();
-    ctx.translate(wx, wy);
-    ctx.scale(0.65, 1.45);
-    const gTire = ctx.createRadialGradient(0, 0, 12, 0, 0, 115);
-    gTire.addColorStop(0.0, 'rgba(4, 6, 12, 0.62)');
-    gTire.addColorStop(0.5, 'rgba(4, 6, 12, 0.26)');
-    gTire.addColorStop(1.0, 'rgba(4, 6, 12, 0.0)');
-    ctx.fillStyle = gTire;
-    ctx.beginPath();
-    ctx.arc(0, 0, 115, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
+// True Cycles path-traced White Studio shadow-catcher plane (14m x 14m exact top-down ortho bake)
+// Aligns 1:1 with centered carRoot so all 4 tires & diffuser penumbra match Cycles to the millimeter!
+const whiteShadowTexture = new THREE.TextureLoader().load('./env/white_shadow.png');
+whiteShadowTexture.colorSpace = THREE.SRGBColorSpace;
+whiteShadowTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
 
 const contactShadowPlane = new THREE.Mesh(
-  new THREE.PlaneGeometry(3.8, 7.2),
+  new THREE.PlaneGeometry(14, 14),
   new THREE.MeshBasicMaterial({
-    map: createStudioShadowPlaneTexture(),
+    map: whiteShadowTexture,
     transparent: true,
     depthWrite: false,
-    opacity: 0.88,
+    opacity: 0.92,
   })
 );
 contactShadowPlane.rotation.x = -Math.PI / 2;
@@ -567,16 +492,14 @@ function applyStudio(studioName) {
     renderPass.clearAlpha = 1;
     if (darkEnvMap) scene.environment = darkEnvMap;
     darkFloor.visible = true;
-    whiteShadowFloor.visible = false;
     contactShadowPlane.visible = false;
   } else {
-    // Transparent canvas over CSS #FFFFFF so the shadow plane composites cleanly without AgX washout!
+    // Transparent canvas over CSS #FFFFFF so the Cycles shadow plane composites cleanly without AgX washout!
     scene.background = null;
     renderer.setClearColor(0x000000, 0);
     renderPass.clearAlpha = 0;
     if (whiteEnvMap) scene.environment = whiteEnvMap;
     darkFloor.visible = false;
-    whiteShadowFloor.visible = true;
     contactShadowPlane.visible = true;
   }
 
