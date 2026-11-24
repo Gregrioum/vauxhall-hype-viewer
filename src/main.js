@@ -7,6 +7,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import './style.css';
 
 // ============================================================================
@@ -16,100 +17,164 @@ const FOCAL_AUTO_ORBIT = 80; // mm (default while rotating)
 const FOCAL_FREE_BROWSE = 50; // mm (free browsing)
 const SENSOR_WIDTH_MM = 36; // Full-frame 36mm matching Blender cameras
 
+// Blender "AgX - Very High Contrast" filmic S-curve look pass (preserves alpha for White Studio shadows!)
+const AgXContrastShader = {
+  uniforms: {
+    tDiffuse: { value: null },
+    uContrast: { value: 1.22 },
+    uShadowToe: { value: 0.045 },
+    uSaturation: { value: 1.08 },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform float uContrast;
+    uniform float uShadowToe;
+    uniform float uSaturation;
+    varying vec2 vUv;
+
+    void main() {
+      vec4 texel = texture2D(tDiffuse, vUv);
+      vec3 c = texel.rgb;
+
+      // Only grade opaque/semi-opaque shaded pixels (leave transparent shadow-catcher alpha pure)
+      if (texel.a > 0.001) {
+        // Subtle shadow toe deepening (eliminates milky/watercolor midtone wash)
+        c = max(c - vec3(uShadowToe), vec3(0.0)) / (1.0 - uShadowToe);
+
+        // Smooth S-curve contrast around mid-grey 0.48
+        vec3 centered = c - vec3(0.48);
+        c = clamp(centered * uContrast + vec3(0.48), 0.0, 1.0);
+
+        // Gentle filmic shoulder curve to keep deep darks & crisp specular pop
+        c = mix(c, c * c * (3.0 - 2.0 * c), 0.16);
+
+        // Slight saturation lift matching AgX Very High Contrast
+        float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
+        c = clamp(mix(vec3(luma), c, uSaturation), 0.0, 1.0);
+      }
+
+      gl_FragColor = vec4(c, texel.a);
+    }
+  `,
+};
+
 const STUDIO_PROFILES = {
   dark: {
-    exposure: 0.84,
-    envIntensity: 0.92,
-    keyLightIntensity: 0.22,
+    exposure: 0.86,
+    envIntensity: 1.0,
+    keyLightIntensity: 0.55,
+    rimLightIntensity: 0.45,
+    cabinLightIntensity: 1.8,
     bloomEnabled: true,
-    bloomThreshold: 2.6,
-    bloomStrength: 0.085,
-    bloomRadius: 0.22,
+    bloomThreshold: 4.2,
+    bloomStrength: 0.022, // Whisper-subtle optical glint — no hazy fog!
+    bloomRadius: 0.14,
+    contrast: 1.24,
+    shadowToe: 0.045,
+    saturation: 1.08,
     materials: {
       'METALLIC CARPAINT - columbia blue': {
-        base: [0.14, 0.15, 0.17],
-        highlight: [0.88, 0.91, 0.96],
-        metalness: 0.92,
-        roughness: 0.25,
-        clearcoat: 0.8,
-        clearcoatRoughness: 0.045,
+        base: [0.065, 0.074, 0.09], // Deeper sculptural metallic core for high contrast
+        highlight: [0.84, 0.89, 0.96],
+        metalness: 0.96,
+        roughness: 0.15, // Crisp liquid-metal automotive reflections
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.02,
       },
       'SATIN METALLIC CARPAINT - lava': {
-        base: [0.3419, 0.0123, 0.0024],
-        highlight: [0.82, 0.86, 0.92],
-        metalness: 0.93,
-        roughness: 0.26,
-        clearcoat: 0.8,
-        clearcoatRoughness: 0.045,
+        base: [0.24, 0.007, 0.0015], // Deep rich metallic crimson core
+        highlight: [0.88, 0.36, 0.24],
+        metalness: 0.92,
+        roughness: 0.19,
+        clearcoat: 0.9,
+        clearcoatRoughness: 0.03,
       },
       'HYPE_METALLIC CARPAINT - grey': {
-        color: [0.76, 0.79, 0.84],
+        color: [0.76, 0.8, 0.86],
         metalness: 1.0,
-        roughness: 0.15,
+        roughness: 0.11,
       },
       'SATIN METALLIC CARPAINT - anthracite': {
-        color: [0.01, 0.011, 0.014],
-        metalness: 0.55,
-        roughness: 0.28,
+        color: [0.008, 0.009, 0.012],
+        metalness: 0.6,
+        roughness: 0.22,
       },
       'GLASS - windshield': {
-        metalness: 0.1,
-        roughness: 0.022,
+        color: [0.08, 0.11, 0.15],
+        metalness: 0.06,
+        roughness: 0.015,
+        opacity: 0.26,
+        envMapIntensity: 1.55,
       },
       'odi_LIGHT_front_v1.1': {
-        emissiveIntensity: 3.8,
+        emissiveIntensity: 3.6,
       },
       'odi_LIGHT_rear_v1.1': {
-        emissiveColor: [1.0, 0.006, 0.0],
-        emissiveIntensity: 4.2,
+        emissiveColor: [1.0, 0.005, 0.0],
+        emissiveIntensity: 4.0,
       },
     },
   },
   white: {
-    exposure: 0.94,
+    exposure: 0.95,
     envIntensity: 1.15,
-    keyLightIntensity: 1.2,
+    keyLightIntensity: 1.45,
+    rimLightIntensity: 0.65,
+    cabinLightIntensity: 2.6,
     bloomEnabled: false,
-    bloomThreshold: 2.0,
+    bloomThreshold: 5.0,
     bloomStrength: 0.0,
-    bloomRadius: 0.4,
+    bloomRadius: 0.1,
+    contrast: 1.2,
+    shadowToe: 0.035,
+    saturation: 1.08,
     materials: {
       'METALLIC CARPAINT - columbia blue': {
-        base: [0.24, 0.29, 0.38],
-        highlight: [0.88, 0.92, 0.98],
-        metalness: 0.88,
-        roughness: 0.24,
-        clearcoat: 0.82,
-        clearcoatRoughness: 0.045,
+        base: [0.11, 0.15, 0.23], // Deep cool steel-blue core contrasting against bright horizon
+        highlight: [0.9, 0.94, 1.0],
+        metalness: 0.94,
+        roughness: 0.15,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.02,
       },
       'SATIN METALLIC CARPAINT - lava': {
-        base: [0.3405, 0.0123, 0.0024],
-        highlight: [0.82, 0.87, 0.94],
-        metalness: 0.9,
-        roughness: 0.25,
-        clearcoat: 0.8,
-        clearcoatRoughness: 0.045,
+        base: [0.26, 0.008, 0.0015],
+        highlight: [0.9, 0.38, 0.26],
+        metalness: 0.92,
+        roughness: 0.19,
+        clearcoat: 0.9,
+        clearcoatRoughness: 0.03,
       },
       'HYPE_METALLIC CARPAINT - grey': {
-        color: [0.78, 0.82, 0.88],
+        color: [0.78, 0.83, 0.89],
         metalness: 1.0,
-        roughness: 0.1,
+        roughness: 0.09,
       },
       'SATIN METALLIC CARPAINT - anthracite': {
-        color: [0.005, 0.006, 0.009],
-        metalness: 0.3,
-        roughness: 0.24,
+        color: [0.006, 0.007, 0.01],
+        metalness: 0.45,
+        roughness: 0.2,
       },
       'GLASS - windshield': {
+        color: [0.1, 0.14, 0.2],
         metalness: 0.05,
-        roughness: 0.015,
+        roughness: 0.014,
+        opacity: 0.28,
+        envMapIntensity: 1.4,
       },
       'odi_LIGHT_front_v1.1': {
         emissiveIntensity: 4.5,
       },
       'odi_LIGHT_rear_v1.1': {
         emissiveColor: [1.0, 0.004, 0.0],
-        emissiveIntensity: 2.6,
+        emissiveIntensity: 2.8,
       },
     },
   },
@@ -173,6 +238,7 @@ const presetButtons = Array.from(document.querySelectorAll('.preset-btn'));
 // ============================================================================
 const renderer = new THREE.WebGLRenderer({
   antialias: true,
+  alpha: true, // Enables spotless pure-#FFFFFF White Studio shadow-catcher compositing!
   powerPreference: 'high-performance',
 });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -188,8 +254,6 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
 
 function focalLengthToVFov(focalMm, aspect) {
-  // Blender sensor_fit = AUTO with 36mm horizontal sensor on landscape;
-  // gently widens on narrow/portrait viewports so car stays fully framed.
   const effectiveAspect = Math.max(aspect, 0.72);
   const sensorH = SENSOR_WIDTH_MM / effectiveAspect;
   return THREE.MathUtils.radToDeg(2 * Math.atan(sensorH / (2 * focalMm)));
@@ -209,13 +273,12 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.055;
 controls.enablePan = false;
-controls.minDistance = 3.6;
+controls.minDistance = 3.2;
 controls.maxDistance = 28.0;
 controls.minPolarAngle = 0.14;
-controls.maxPolarAngle = Math.PI * 0.492; // Clamp cleanly above studio floor
+controls.maxPolarAngle = Math.PI * 0.492;
 controls.target.copy(CAMERA_PRESETS.front34.target);
 
-// Place initial camera at Front 3/4 (80mm)
 function setCameraFromSpherical(azimuth, polar, distance, target) {
   const sph = new THREE.Spherical(distance, polar, azimuth);
   const offset = new THREE.Vector3().setFromSpherical(sph);
@@ -231,7 +294,7 @@ setCameraFromSpherical(
   CAMERA_PRESETS.front34.target
 );
 
-// Post-processing Composer (HalfFloat + MSAA for crisp AgX + Cycles-style bloom)
+// Post-processing Composer (HalfFloat + MSAA + whisper bloom + AgX Very High Contrast look)
 const renderTarget = new THREE.WebGLRenderTarget(
   window.innerWidth,
   window.innerHeight,
@@ -242,6 +305,7 @@ const renderTarget = new THREE.WebGLRenderTarget(
 );
 const composer = new EffectComposer(renderer, renderTarget);
 const renderPass = new RenderPass(scene, camera);
+renderPass.clearAlpha = 0;
 composer.addPass(renderPass);
 
 const bloomPass = new UnrealBloomPass(
@@ -255,26 +319,39 @@ composer.addPass(bloomPass);
 const outputPass = new OutputPass();
 composer.addPass(outputPass);
 
+const contrastPass = new ShaderPass(AgXContrastShader);
+composer.addPass(contrastPass);
+
 // ============================================================================
-// Studio Lighting & Ground Floors
+// Studio Lighting, Interior Fill & Ground Shadow Planes
 // ============================================================================
-// Overhead + slightly front-left directional key for crisp soft floor shadows
+// Overhead sculpt directional key light (matches White_Sculpt_Key + casts soft studio shadows)
 const keyLight = new THREE.DirectionalLight(0xf6f9ff, STUDIO_PROFILES.dark.keyLightIntensity);
-keyLight.position.set(-4.2, 8.5, 4.6);
+keyLight.position.set(-4.6, 8.2, 4.4);
 keyLight.castShadow = true;
 keyLight.shadow.mapSize.set(2048, 2048);
 keyLight.shadow.camera.near = 1;
 keyLight.shadow.camera.far = 26;
-keyLight.shadow.camera.left = -4.2;
-keyLight.shadow.camera.right = 4.2;
-keyLight.shadow.camera.top = 4.2;
-keyLight.shadow.camera.bottom = -4.2;
-keyLight.shadow.bias = -0.0004;
-keyLight.shadow.normalBias = 0.025;
-keyLight.shadow.radius = 5.5;
+keyLight.shadow.camera.left = -4.5;
+keyLight.shadow.camera.right = 4.5;
+keyLight.shadow.camera.top = 4.5;
+keyLight.shadow.camera.bottom = -4.5;
+keyLight.shadow.bias = -0.00035;
+keyLight.shadow.normalBias = 0.02;
+keyLight.shadow.radius = 6.5;
 scene.add(keyLight);
 
-// Dark Studio seamless pitch-black floor (matches DarkStudio_BlackFloor_Mat pure black void)
+// Crisp rear-right rim accent light to carve sculptural edges on the metallic bodywork
+const rimLight = new THREE.DirectionalLight(0xeef5ff, STUDIO_PROFILES.dark.rimLightIntensity);
+rimLight.position.set(4.5, 4.2, -6.5);
+scene.add(rimLight);
+
+// Subtle cockpit interior fill light so the orange-gold/navy Alcantara seats & steering wheel read clearly through the glass
+const cabinLight = new THREE.PointLight(0xf5f7ff, STUDIO_PROFILES.dark.cabinLightIntensity, 3.4, 1.5);
+cabinLight.position.set(0.0, 0.92, 0.1);
+scene.add(cabinLight);
+
+// Dark Studio seamless pitch-black floor
 const darkFloor = new THREE.Mesh(
   new THREE.CircleGeometry(30, 64),
   new THREE.MeshBasicMaterial({
@@ -286,58 +363,81 @@ darkFloor.rotation.x = -Math.PI / 2;
 darkFloor.position.y = -0.002;
 scene.add(darkFloor);
 
-// White Studio shadow-catcher floor (matches WhiteStudio_ShadowCatcher_Mat)
+// White Studio real-time shadow-catcher plane (composites directly over CSS #FFFFFF — zero AgX washout!)
 const whiteShadowFloor = new THREE.Mesh(
   new THREE.PlaneGeometry(36, 36),
   new THREE.ShadowMaterial({
-    color: 0x0b1220,
-    opacity: 0.34,
+    color: 0x0d1522,
+    opacity: 0.28,
   })
 );
 whiteShadowFloor.rotation.x = -Math.PI / 2;
-whiteShadowFloor.position.y = -0.002;
+whiteShadowFloor.position.y = -0.001;
 whiteShadowFloor.receiveShadow = true;
 whiteShadowFloor.visible = false;
 scene.add(whiteShadowFloor);
 
-// Soft procedural under-chassis ambient contact shadow for White Studio realism
-function createContactShadowTexture() {
-  const w = 512;
-  const h = 1024;
+// Soft studio under-chassis & 4-wheel contact AO shadow plane (matches WhiteStudio_ShadowCatcher_Mat)
+function createStudioShadowPlaneTexture() {
+  const w = 1024;
+  const h = 2048;
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, w, h);
 
-  // Broad soft studio penumbra
+  // 1. Wide soft studio overhead penumbra (slightly offset toward rear-right like White_Sculpt_Key)
   ctx.save();
-  ctx.translate(w / 2, h / 2);
-  ctx.scale(1.0, 2.05);
-  const g1 = ctx.createRadialGradient(0, 0, 20, 0, 0, 215);
-  g1.addColorStop(0.0, 'rgba(10, 15, 24, 0.42)');
-  g1.addColorStop(0.45, 'rgba(10, 15, 24, 0.24)');
-  g1.addColorStop(0.75, 'rgba(10, 15, 24, 0.07)');
-  g1.addColorStop(1.0, 'rgba(10, 15, 24, 0.0)');
-  ctx.fillStyle = g1;
+  ctx.translate(w * 0.53, h * 0.51);
+  ctx.scale(1.05, 1.92);
+  const gWide = ctx.createRadialGradient(0, 0, 40, 0, 0, 430);
+  gWide.addColorStop(0.0, 'rgba(14, 20, 32, 0.34)');
+  gWide.addColorStop(0.45, 'rgba(14, 20, 32, 0.20)');
+  gWide.addColorStop(0.75, 'rgba(14, 20, 32, 0.06)');
+  gWide.addColorStop(1.0, 'rgba(14, 20, 32, 0.0)');
+  ctx.fillStyle = gWide;
   ctx.beginPath();
-  ctx.arc(0, 0, 215, 0, Math.PI * 2);
+  ctx.arc(0, 0, 430, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 
-  // Tighter under-body core occlusion
+  // 2. Tighter under-body chassis occlusion core
   ctx.save();
-  ctx.translate(w / 2, h / 2);
-  ctx.scale(0.82, 1.9);
-  const g2 = ctx.createRadialGradient(0, 0, 10, 0, 0, 165);
-  g2.addColorStop(0.0, 'rgba(5, 8, 14, 0.48)');
-  g2.addColorStop(0.65, 'rgba(5, 8, 14, 0.20)');
-  g2.addColorStop(1.0, 'rgba(5, 8, 14, 0.0)');
-  ctx.fillStyle = g2;
+  ctx.translate(w * 0.5, h * 0.5);
+  ctx.scale(0.74, 1.72);
+  const gCore = ctx.createRadialGradient(0, 0, 30, 0, 0, 340);
+  gCore.addColorStop(0.0, 'rgba(8, 12, 20, 0.52)');
+  gCore.addColorStop(0.55, 'rgba(8, 12, 20, 0.30)');
+  gCore.addColorStop(0.85, 'rgba(8, 12, 20, 0.08)');
+  gCore.addColorStop(1.0, 'rgba(8, 12, 20, 0.0)');
+  ctx.fillStyle = gCore;
   ctx.beginPath();
-  ctx.arc(0, 0, 165, 0, Math.PI * 2);
+  ctx.arc(0, 0, 340, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
+
+  // 3. Dedicated crisp tire contact shadows at all 4 wheel footprints
+  const wheelCoords = [
+    [w * 0.26, h * 0.25], // Front-left
+    [w * 0.74, h * 0.25], // Front-right
+    [w * 0.27, h * 0.75], // Rear-left
+    [w * 0.73, h * 0.75], // Rear-right
+  ];
+  for (const [wx, wy] of wheelCoords) {
+    ctx.save();
+    ctx.translate(wx, wy);
+    ctx.scale(0.65, 1.45);
+    const gTire = ctx.createRadialGradient(0, 0, 12, 0, 0, 115);
+    gTire.addColorStop(0.0, 'rgba(4, 6, 12, 0.62)');
+    gTire.addColorStop(0.5, 'rgba(4, 6, 12, 0.26)');
+    gTire.addColorStop(1.0, 'rgba(4, 6, 12, 0.0)');
+    ctx.fillStyle = gTire;
+    ctx.beginPath();
+    ctx.arc(0, 0, 115, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -345,9 +445,9 @@ function createContactShadowTexture() {
 }
 
 const contactShadowPlane = new THREE.Mesh(
-  new THREE.PlaneGeometry(3.4, 6.7),
+  new THREE.PlaneGeometry(3.8, 7.2),
   new THREE.MeshBasicMaterial({
-    map: createContactShadowTexture(),
+    map: createStudioShadowPlaneTexture(),
     transparent: true,
     depthWrite: false,
     opacity: 0.88,
@@ -371,7 +471,7 @@ const fresnelUniforms = new Map();
 let mixer = null;
 let aeroActions = [];
 let maxClipDuration = 40 / 30;
-let aeroProgress = 0; // 0.0 (closed) -> 1.0 (open)
+let aeroProgress = 0;
 let aeroTarget = 0;
 let aeroAnimatingToTarget = false;
 let aeroAnimStartVal = 0;
@@ -380,7 +480,6 @@ const AERO_TRANSITION_SEC = 1.35;
 
 let isLooping = false;
 let loopClock = 0;
-// Loop cycle: Hold Closed (0.65s) -> Open (1.35s) -> Hold Open (1.35s) -> Close (1.35s)
 const LOOP_HOLD_CLOSED = 0.65;
 const LOOP_OPEN_DUR = 1.35;
 const LOOP_HOLD_OPEN = 1.35;
@@ -389,13 +488,13 @@ const LOOP_TOTAL = LOOP_HOLD_CLOSED + LOOP_OPEN_DUR + LOOP_HOLD_OPEN + LOOP_CLOS
 
 // Camera & Auto-Orbit State
 let isAutoRotating = true;
-const AUTO_ROTATE_SPEED = 0.16; // rad/s (~39s per 360° studio rotation)
+const AUTO_ROTATE_SPEED = 0.16;
 let isUserWheelZooming = false;
 let wheelTimeout = null;
 let activeCameraTween = null;
 
 // ============================================================================
-// Blender Fresnel Car-Paint Shader Hook (Layer Weight -> ColorRamp -> Mix)
+// High-Contrast Automotive Fresnel Metallic Car-Paint Shader Hook
 // ============================================================================
 function attachBlenderFresnelPaint(material, initialBase, initialHighlight) {
   const uniforms = {
@@ -419,16 +518,16 @@ function attachBlenderFresnelPaint(material, initialBase, initialHighlight) {
         '#include <lights_fragment_begin>',
         `{
           float ndotv = clamp(abs(dot(normalize(normal), normalize(vViewPosition))), 0.0, 1.0);
-          // Match Blender Layer Weight (Facing, blend=0.5) -> ColorRamp(0.25..0.88 -> 0..0.48)
-          float lwFacing = 1.0 - sqrt(ndotv);
-          float rampT = clamp((lwFacing - 0.25) / (0.88 - 0.25), 0.0, 1.0);
-          float mixFac = 0.48 * rampT;
+          // Sculptural metallic flop: deep rich base on facing planes, crisp metallic highlight along grazing curves
+          float lwFacing = 1.0 - pow(ndotv, 0.55);
+          float rampT = smoothstep(0.28, 0.90, lwFacing);
+          float mixFac = 0.58 * rampT;
           diffuseColor.rgb = mix(uCarBaseColor, uCarHighlightTint, mixFac);
         }
         #include <lights_fragment_begin>`
       );
   };
-  material.customProgramCacheKey = () => `blender-fresnel-${material.name}`;
+  material.customProgramCacheKey = () => `blender-fresnel-hc-${material.name}`;
   material.needsUpdate = true;
 }
 
@@ -442,13 +541,17 @@ function applyStudio(studioName) {
 
   if (studioName === 'dark') {
     scene.background = new THREE.Color(0x000000);
+    renderer.setClearColor(0x000000, 1);
+    renderPass.clearAlpha = 1;
     if (darkEnvMap) scene.environment = darkEnvMap;
     darkFloor.visible = true;
     whiteShadowFloor.visible = false;
     contactShadowPlane.visible = false;
   } else {
-    // Linear 18.0 maps cleanly through AgX to pure spotless studio #FFFFFF
-    scene.background = new THREE.Color(18.0, 18.0, 18.0);
+    // Transparent canvas over CSS #FFFFFF so the shadow plane composites cleanly without AgX washout!
+    scene.background = null;
+    renderer.setClearColor(0x000000, 0);
+    renderPass.clearAlpha = 0;
     if (whiteEnvMap) scene.environment = whiteEnvMap;
     darkFloor.visible = false;
     whiteShadowFloor.visible = true;
@@ -458,13 +561,19 @@ function applyStudio(studioName) {
   scene.environmentIntensity = profile.envIntensity;
   renderer.toneMappingExposure = profile.exposure;
   keyLight.intensity = profile.keyLightIntensity;
+  rimLight.intensity = profile.rimLightIntensity;
+  cabinLight.intensity = profile.cabinLightIntensity;
 
   bloomPass.enabled = profile.bloomEnabled;
   bloomPass.threshold = profile.bloomThreshold;
   bloomPass.strength = profile.bloomStrength;
   bloomPass.radius = profile.bloomRadius;
 
-  // Apply exact per-studio material calibration from the two Blender files
+  contrastPass.uniforms.uContrast.value = profile.contrast;
+  contrastPass.uniforms.uShadowToe.value = profile.shadowToe;
+  contrastPass.uniforms.uSaturation.value = profile.saturation;
+
+  // Apply exact per-studio material calibration
   for (const [matName, cfg] of Object.entries(profile.materials)) {
     const mat = namedMaterials.get(matName);
     if (!mat) continue;
@@ -483,6 +592,8 @@ function applyStudio(studioName) {
     if (cfg.clearcoatRoughness !== undefined && 'clearcoatRoughness' in mat) {
       mat.clearcoatRoughness = cfg.clearcoatRoughness;
     }
+    if (cfg.opacity !== undefined) mat.opacity = cfg.opacity;
+    if (cfg.envMapIntensity !== undefined) mat.envMapIntensity = cfg.envMapIntensity;
     if (cfg.emissiveColor && mat.emissive) {
       mat.emissive.setRGB(...cfg.emissiveColor);
     }
@@ -514,7 +625,6 @@ function setAeroProgress(val) {
     mixer.update(0);
   }
 
-  // Sync UI
   const pct = Math.round(aeroProgress * 100);
   aeroScrubber.value = (aeroProgress * 100).toFixed(1);
   aeroPct.textContent = `${pct}%`;
@@ -524,7 +634,6 @@ function setAeroProgress(val) {
   labelAero.textContent = isOpenOrOpening ? 'Close Aero Flaps' : 'Open Aero Flaps';
   btnAeroToggle.classList.toggle('active', isOpenOrOpening && !isLooping);
 
-  // Swap play / reverse icon subtly
   iconAero.innerHTML = isOpenOrOpening
     ? '<polygon points="19 3 5 12 19 21 19 3" />'
     : '<polygon points="5 3 19 12 5 21 5 3" />';
@@ -547,11 +656,10 @@ function setLoopMode(enabled) {
   btnAeroLoop.classList.toggle('loop-active', isLooping);
   if (isLooping) {
     aeroAnimatingToTarget = false;
-    // Start smoothly from current position in the loop
     if (aeroProgress < 0.05) {
-      loopClock = LOOP_HOLD_CLOSED; // begin opening right away on click!
+      loopClock = LOOP_HOLD_CLOSED;
     } else if (aeroProgress > 0.95) {
-      loopClock = LOOP_HOLD_CLOSED + LOOP_OPEN_DUR + LOOP_HOLD_OPEN; // begin closing
+      loopClock = LOOP_HOLD_CLOSED + LOOP_OPEN_DUR + LOOP_HOLD_OPEN;
     } else {
       loopClock = LOOP_HOLD_CLOSED + aeroProgress * LOOP_OPEN_DUR;
     }
@@ -588,7 +696,6 @@ function tweenToPreset(presetKey) {
   const scaleFactor = targetFocalMm / FOCAL_AUTO_ORBIT;
   const endDist = preset.distance80 * scaleFactor;
 
-  // Shortest angular path for azimuth
   let deltaTheta = preset.azimuth - startSph.theta;
   while (deltaTheta > Math.PI) deltaTheta -= Math.PI * 2;
   while (deltaTheta < -Math.PI) deltaTheta += Math.PI * 2;
@@ -607,7 +714,6 @@ function tweenToPreset(presetKey) {
   };
 }
 
-// When the user manually grabs/drags/zooms the canvas -> switch smoothly to Free Browse (50mm)
 controls.addEventListener('start', () => {
   activeCameraTween = null;
   interactionHint.classList.add('faded');
@@ -654,7 +760,6 @@ presetButtons.forEach((btn) => {
   });
 });
 
-// Keyboard shortcuts
 window.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') return;
   if (e.code === 'Space') {
@@ -670,7 +775,7 @@ window.addEventListener('keydown', (e) => {
 });
 
 // ============================================================================
-// Load Studio HDRIs & Draco-Compressed Vauxhall HYPE GLB
+// Load 2K Studio HDRIs & Vauxhall HYPE GLB (with Cockpit Interior)
 // ============================================================================
 const pmremGenerator = new THREE.PMREMGenerator(renderer);
 pmremGenerator.compileEquirectangularShader();
@@ -705,7 +810,7 @@ async function initAssets() {
     pmremGenerator.dispose();
 
     hdrProgress = 1;
-    updateLoaderBar('Loading Vauxhall HYPE geometry & aero flaps…');
+    updateLoaderBar('Loading Vauxhall HYPE geometry & interior…');
 
     const gltf = await new Promise((resolve, reject) => {
       gltfLoader.load(
@@ -724,7 +829,7 @@ async function initAssets() {
     });
 
     glbProgress = 1;
-    updateLoaderBar('Calibrating materials & studio reflections…');
+    updateLoaderBar('Calibrating materials, glass & shadows…');
 
     const carRoot = gltf.scene;
 
@@ -733,19 +838,18 @@ async function initAssets() {
     const center = box.getCenter(new THREE.Vector3());
     carRoot.position.set(-center.x, -box.min.y, -center.z);
 
-    // Upgrade & catalog materials for Cycles-grade realism
+    // Upgrade & catalog materials
     carRoot.traverse((child) => {
       if (!child.isMesh) return;
 
-      child.castShadow = true;
-      child.receiveShadow = true;
-
       const mats = Array.isArray(child.material) ? child.material : [child.material];
+      let isGlassMesh = false;
+
       mats.forEach((mat) => {
         if (!mat) return;
         namedMaterials.set(mat.name, mat);
 
-        // Attach Blender Layer-Weight Fresnel car paint shader to hero paints
+        // Attach high-contrast automotive Fresnel car paint shader
         if (
           (mat.name === 'METALLIC CARPAINT - columbia blue' ||
             mat.name === 'SATIN METALLIC CARPAINT - lava') &&
@@ -755,18 +859,42 @@ async function initAssets() {
           attachBlenderFresnelPaint(mat, prof.base, prof.highlight);
         }
 
-        // Crisp translucent red tail lens
+        // Lightly smoked transparent automotive glass so interior cockpit & seats are clearly visible!
+        if (mat.name === 'GLASS - windshield' || mat.name === 'odi_GLASS_reflection_v1.1') {
+          isGlassMesh = true;
+          mat.transparent = true;
+          mat.opacity = 0.26;
+          mat.roughness = 0.015;
+          mat.metalness = 0.06;
+          if ('clearcoat' in mat) {
+            mat.clearcoat = 1.0;
+            mat.clearcoatRoughness = 0.01;
+          }
+          if ('ior' in mat) mat.ior = 1.52;
+          if ('reflectivity' in mat) mat.reflectivity = 1.0;
+          mat.depthWrite = false;
+          mat.side = THREE.FrontSide;
+          mat.needsUpdate = true;
+        }
+
+        // Translucent red tail lens
         if (mat.name === 'LIGHT LENS PLASTIC - red') {
           mat.transparent = true;
-          mat.opacity = 0.55;
+          mat.opacity = 0.52;
           mat.depthWrite = false;
         }
 
         // Prevent z-fighting on decals
         if (
-          ['CAUTION', 'RED_TRIANGLE', 'STEP AWAY', 'STEP AWAY.001', 'VISION GT', 'VX_POS_HORIZONTAL_RGB', 'Vauxhall-logo-1990-1024x768_02'].includes(
-            mat.name
-          )
+          [
+            'CAUTION',
+            'RED_TRIANGLE',
+            'STEP AWAY',
+            'STEP AWAY.001',
+            'VISION GT',
+            'VX_POS_HORIZONTAL_RGB',
+            'Vauxhall-logo-1990-1024x768_02',
+          ].includes(mat.name)
         ) {
           mat.polygonOffset = true;
           mat.polygonOffsetFactor = -1;
@@ -774,11 +902,18 @@ async function initAssets() {
           mat.roughness = 0.35;
         }
       });
+
+      // Let light pass into the cockpit through glass (glass does not cast opaque shadow onto seats!)
+      child.castShadow = !isGlassMesh;
+      child.receiveShadow = !isGlassMesh;
+      if (isGlassMesh) {
+        child.renderOrder = 2; // Render glass cleanly over interior cockpit
+      }
     });
 
     scene.add(carRoot);
 
-    // Set up Shape-Key Aero Flap AnimationMixer (all 7 flaps synchronized)
+    // Shape-Key Aero Flap AnimationMixer (all 7 flaps synchronized)
     if (gltf.animations && gltf.animations.length > 0) {
       mixer = new THREE.AnimationMixer(carRoot);
       maxClipDuration = 0;
@@ -795,12 +930,10 @@ async function initAssets() {
       mixer.update(0);
     }
 
-    // Apply initial Dark Studio calibration
     applyStudio('dark');
     updateCameraModeUI();
     setAeroProgress(0);
 
-    // Expose tiny debug hook for verification
     window.__hypeViewer = {
       applyStudio,
       setAeroProgress,
@@ -808,18 +941,8 @@ async function initAssets() {
       setLoopMode,
       setAutoRotate,
       tweenToPreset,
-      getState: () => ({
-        studio: currentStudio,
-        focalMm: Math.round(currentFocalMm * 10) / 10,
-        targetFocalMm,
-        isAutoRotating,
-        aeroProgress: Math.round(aeroProgress * 1000) / 1000,
-        isLooping,
-        clipCount: aeroActions.length,
-      }),
     };
 
-    // Hide loader smoothly
     setTimeout(() => {
       loaderEl.classList.add('hidden');
     }, 220);
@@ -919,14 +1042,12 @@ function animate() {
       activeCameraTween = null;
     }
   } else if (isAutoRotating) {
-    // Smooth studio turntable orbit around the car
     const offset = camera.position.clone().sub(controls.target);
     offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), -AUTO_ROTATE_SPEED * dt);
     camera.position.copy(controls.target).add(offset);
   }
 
   // 3. Smooth Focal Length Transition (80mm Auto-Rotate <-> 50mm Free Browse)
-  // Includes proportional dolly compensation so car stays smoothly framed!
   if (Math.abs(currentFocalMm - targetFocalMm) > 0.02) {
     const prevFocal = currentFocalMm;
     const alpha = 1 - Math.exp(-6.5 * dt);
