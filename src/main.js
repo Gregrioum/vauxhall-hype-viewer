@@ -124,8 +124,8 @@ const STUDIO_PROFILES = {
         emissiveIntensity: 3.8,
       },
       'odi_LIGHT_rear_v1.1': {
-        emissiveColor: [1.0, 0.008, 0.002],
-        emissiveIntensity: 2.4,
+        emissiveColor: [1.0, 0.005, 0.0],
+        emissiveIntensity: 0.45, // Calm standby running light when flaps are closed
       },
     },
   },
@@ -187,8 +187,8 @@ const STUDIO_PROFILES = {
         emissiveIntensity: 4.5,
       },
       'odi_LIGHT_rear_v1.1': {
-        emissiveColor: [1.0, 0.006, 0.002],
-        emissiveIntensity: 1.8,
+        emissiveColor: [1.0, 0.005, 0.0],
+        emissiveIntensity: 0.55, // Calm standby running light when flaps are closed
       },
     },
   },
@@ -393,31 +393,31 @@ const rearGlowTexture = createRedGlowTexture();
 const rearBrakeGroup = new THREE.Group();
 scene.add(rearBrakeGroup);
 
-// 3 soft red bounce lights casting real crimson glow onto rear diffuser & open flaps
+// 3 soft red bounce lights casting vivid crimson glow onto rear diffuser & open flaps
 const rearBounceLights = [
-  { pos: [0.0, 0.64, -2.92], mult: 1.0 },
-  { pos: [-0.72, 0.62, -2.54], mult: 0.75 },
-  { pos: [0.72, 0.62, -2.54], mult: 0.75 },
+  { pos: [0.0, 0.63, -2.96], mult: 1.0 },
+  { pos: [-0.76, 0.61, -2.56], mult: 0.8 },
+  { pos: [0.76, 0.61, -2.56], mult: 0.8 },
 ].map(({ pos, mult }) => {
-  const pl = new THREE.PointLight(0xff0a06, 0, 3.4, 1.8);
+  const pl = new THREE.PointLight(0xff0b06, 0, 4.6, 1.6);
   pl.position.set(...pos);
   pl.userData.mult = mult;
   rearBrakeGroup.add(pl);
   return pl;
 });
 
-// 5 feathered optical bloom sprites hugging the swept chevron rear tail-light arc
-// (depthTest=true so front views never bleed through the chassis!)
+// 5 feathered crimson optical bloom sprites tightly hugging the swept chevron tail-light bar
+// (dynamically hidden when viewing from the front half so there is zero bleed-through!)
 const rearHaloSprites = [
-  { pos: [0.0, 0.65, -2.86], scale: [1.55, 0.78, 1], mult: 1.0 },
-  { pos: [-0.46, 0.635, -2.66], scale: [1.25, 0.68, 1], mult: 0.85 },
-  { pos: [0.46, 0.635, -2.66], scale: [1.25, 0.68, 1], mult: 0.85 },
-  { pos: [-0.84, 0.625, -2.38], scale: [1.0, 0.58, 1], mult: 0.72 },
-  { pos: [0.84, 0.625, -2.38], scale: [1.0, 0.58, 1], mult: 0.72 },
+  { pos: [0.0, 0.64, -2.86], scale: [1.35, 0.56, 1], mult: 1.0 },
+  { pos: [-0.46, 0.63, -2.68], scale: [1.05, 0.48, 1], mult: 0.9 },
+  { pos: [0.46, 0.63, -2.68], scale: [1.05, 0.48, 1], mult: 0.9 },
+  { pos: [-0.84, 0.62, -2.38], scale: [0.82, 0.42, 1], mult: 0.75 },
+  { pos: [0.84, 0.62, -2.38], scale: [0.82, 0.42, 1], mult: 0.75 },
 ].map(({ pos, scale, mult }) => {
   const mat = new THREE.SpriteMaterial({
     map: rearGlowTexture,
-    color: 0xff160e,
+    color: new THREE.Color(1.0, 0.04, 0.02),
     transparent: true,
     opacity: 0,
     depthWrite: false,
@@ -427,7 +427,7 @@ const rearHaloSprites = [
   const sp = new THREE.Sprite(mat);
   sp.position.set(...pos);
   sp.scale.set(...scale);
-  sp.renderOrder = 4;
+  sp.renderOrder = 6;
   sp.userData.mult = mult;
   sp.userData.baseScale = scale;
   rearBrakeGroup.add(sp);
@@ -548,6 +548,53 @@ function attachBlenderFresnelPaint(material, initialBase, initialHighlight) {
 }
 
 // ============================================================================
+// Wheel-Arch Ambient Occlusion Shader for Tires (odi_TIRE_v1.004)
+// Deeply darkens the upper tire tread & sidewall tucked beneath the body shell!
+// ============================================================================
+function attachTireWheelArchAO(material) {
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        varying vec3 vTireWorldPos;
+        varying vec3 vTireWorldNormal;`
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        vTireWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
+        vTireWorldNormal = normalize(mat3(modelMatrix) * objectNormal);`
+      );
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        varying vec3 vTireWorldPos;
+        varying vec3 vTireWorldNormal;`
+      )
+      .replace(
+        '#include <lights_fragment_end>',
+        `#include <lights_fragment_end>
+        {
+          // Tires span Y = 0.0 (contact patch) to Y = 0.74 (top tucked deep under fender)
+          float heightMask = smoothstep(0.20, 0.56, vTireWorldPos.y);
+          float upMask = smoothstep(-0.20, 0.50, normalize(vTireWorldNormal).y);
+          float archShadow = clamp(heightMask * 0.80 + heightMask * upMask * 0.16, 0.0, 0.94);
+          float tireAO = 1.0 - archShadow;
+          reflectedLight.indirectDiffuse *= tireAO;
+          reflectedLight.indirectSpecular *= tireAO;
+          reflectedLight.directDiffuse *= mix(1.0, tireAO, 0.88);
+          reflectedLight.directSpecular *= mix(1.0, tireAO, 0.92);
+        }`
+      );
+  };
+  material.customProgramCacheKey = () => 'tire-wheel-arch-ao-v1';
+  material.needsUpdate = true;
+}
+
+// ============================================================================
 // Studio Switching (Dark Studio <-> White Studio)
 // ============================================================================
 function applyStudio(studioName) {
@@ -628,62 +675,93 @@ function applyStudio(studioName) {
 // ============================================================================
 // Dynamic Rear Brake-Lamp Brightness & Bloom (synced to aeroProgress 0 -> 1)
 // ============================================================================
+let lastRearGlow = 0;
+
+function updateRearHaloVisibility() {
+  const glow = lastRearGlow;
+  if (glow <= 0.005) {
+    for (const sp of rearHaloSprites) sp.visible = false;
+    return;
+  }
+  // Smoothly fade sprites off only when camera is looking straight from the front nose
+  const rearViewFactor = THREE.MathUtils.clamp(
+    THREE.MathUtils.mapLinear(camera.position.z, 2.2, -0.8, 0.0, 1.0),
+    0.0,
+    1.0
+  );
+  const isDark = currentStudio === 'dark';
+  const haloPeak = isDark ? 0.52 : 0.55;
+
+  for (const sp of rearHaloSprites) {
+    sp.visible = rearViewFactor > 0.01;
+    sp.material.blending = isDark ? THREE.AdditiveBlending : THREE.NormalBlending;
+    // In Dark Studio boost linear RGB above 1.0 so HDR UnrealBloomPass amplifies the crimson halo!
+    if (isDark) {
+      sp.material.color.setRGB(3.5, 0.06, 0.02);
+    } else {
+      sp.material.color.setRGB(1.15, 0.04, 0.02);
+    }
+    sp.material.opacity = haloPeak * glow * rearViewFactor * sp.userData.mult;
+  }
+}
+
 function updateRearLampBloom(progress) {
   const p = THREE.MathUtils.clamp(progress, 0, 1);
-  // Smooth ease-in-out curve so lamps surge convincingly as the aero flaps lift
+  // Smooth ease-in-out surge as the aero flaps lift
   const glow = p * p * (3 - 2 * p);
+  lastRearGlow = glow;
   const isDark = currentStudio === 'dark';
 
-  // 1. Boost rear red LED lamp material brightness (odi_LIGHT_rear_v1.1)
+  // 1. Dramatic standby -> full airbrake surge on rear red LEDs (odi_LIGHT_rear_v1.1)
   const rearLedMat = namedMaterials.get('odi_LIGHT_rear_v1.1');
   if (rearLedMat) {
     if (isDark) {
+      rearLedMat.color.setRGB(THREE.MathUtils.lerp(0.18, 0.85, glow), 0.0, 0.0);
       rearLedMat.emissive.setRGB(
         1.0,
-        THREE.MathUtils.lerp(0.008, 0.022, glow),
-        THREE.MathUtils.lerp(0.002, 0.006, glow)
+        THREE.MathUtils.lerp(0.005, 0.065, glow),
+        THREE.MathUtils.lerp(0.0, 0.02, glow)
       );
-      rearLedMat.emissiveIntensity = THREE.MathUtils.lerp(2.4, 34.0, glow);
+      rearLedMat.emissiveIntensity = THREE.MathUtils.lerp(0.45, 85.0, glow);
     } else {
+      rearLedMat.color.setRGB(THREE.MathUtils.lerp(0.22, 0.9, glow), 0.0, 0.0);
       rearLedMat.emissive.setRGB(
         1.0,
-        THREE.MathUtils.lerp(0.006, 0.032, glow),
-        THREE.MathUtils.lerp(0.002, 0.012, glow)
+        THREE.MathUtils.lerp(0.005, 0.08, glow),
+        THREE.MathUtils.lerp(0.0, 0.025, glow)
       );
-      rearLedMat.emissiveIntensity = THREE.MathUtils.lerp(1.8, 16.0, glow);
+      rearLedMat.emissiveIntensity = THREE.MathUtils.lerp(0.55, 48.0, glow);
     }
   }
 
-  // 2. Illuminate the outer translucent red lens smoothly (LIGHT LENS PLASTIC - red)
+  // 2. Blaze the outer translucent red lens housing (LIGHT LENS PLASTIC - red)
   const rearLensMat = namedMaterials.get('LIGHT LENS PLASTIC - red');
   if (rearLensMat && rearLensMat.emissive) {
-    rearLensMat.emissive.setRGB(1.0, 0.008, 0.002);
-    rearLensMat.emissiveIntensity = THREE.MathUtils.lerp(0.0, isDark ? 3.0 : 2.2, glow);
+    rearLensMat.emissive.setRGB(1.0, 0.014, 0.004);
+    rearLensMat.emissiveIntensity = THREE.MathUtils.lerp(0.0, isDark ? 16.0 : 8.5, glow);
   }
 
-  // 3. Surgical HDR Bloom boost in Dark Studio (high threshold isolates the blazing 34.0 red lamps!)
+  // 3. Surgical High-Threshold HDR Bloom in Dark Studio
+  //    Threshold rises to 6.5 so ONLY the blazing 85.0 red lamps & 16.0 red lens bloom richly!
   if (isDark) {
-    bloomPass.threshold = THREE.MathUtils.lerp(4.0, 5.2, glow);
-    bloomPass.strength = THREE.MathUtils.lerp(0.024, 0.145, glow);
-    bloomPass.radius = THREE.MathUtils.lerp(0.14, 0.56, glow);
+    bloomPass.threshold = THREE.MathUtils.lerp(4.0, 6.5, glow);
+    bloomPass.strength = THREE.MathUtils.lerp(0.024, 0.42, glow);
+    bloomPass.radius = THREE.MathUtils.lerp(0.14, 0.72, glow);
   }
 
-  // 4. Real crimson bounce lights illuminating rear diffuser, bumper, and underside of open aero flaps
-  const bouncePeak = isDark ? 4.8 : 3.2;
+  // 4. Vivid crimson bounce lights illuminating rear diffuser, bumper, and underside of open aero flaps
+  const bouncePeak = isDark ? 12.0 : 8.0;
   for (const pl of rearBounceLights) {
     pl.intensity = bouncePeak * glow * pl.userData.mult;
   }
 
-  // 5. Feathered optical crimson bloom sprites (works seamlessly in BOTH Dark and White Studios!)
-  const haloPeak = isDark ? 0.36 : 0.48;
+  // 5. Update feathered optical crimson bloom sprites
   for (const sp of rearHaloSprites) {
-    sp.material.blending = isDark ? THREE.AdditiveBlending : THREE.NormalBlending;
-    sp.material.opacity = haloPeak * glow * sp.userData.mult;
-    const scaleBoost = THREE.MathUtils.lerp(0.75, 1.15, glow);
+    const scaleBoost = THREE.MathUtils.lerp(0.7, 1.22, glow);
     const [bx, by, bz] = sp.userData.baseScale;
     sp.scale.set(bx * scaleBoost, by * scaleBoost, bz);
-    sp.visible = glow > 0.005;
   }
+  updateRearHaloVisibility();
 }
 
 // ============================================================================
@@ -985,10 +1063,18 @@ async function initAssets() {
           mat.needsUpdate = true;
         }
 
+        // Attach upper wheel-arch ambient occlusion to rubber tires
+        if (mat.name === 'odi_TIRE_v1.004' && !mat.userData._archAOApplied) {
+          mat.userData._archAOApplied = true;
+          mat.roughness = 0.68;
+          mat.envMapIntensity = 0.6;
+          attachTireWheelArchAO(mat);
+        }
+
         // Translucent red tail lens
         if (mat.name === 'LIGHT LENS PLASTIC - red') {
           mat.transparent = true;
-          mat.opacity = 0.52;
+          mat.opacity = 0.58;
           mat.depthWrite = false;
         }
 
@@ -1182,6 +1268,7 @@ function animate() {
     lensLabel.textContent = `${Math.round(currentFocalMm)}mm`;
   }
 
+  updateRearHaloVisibility();
   controls.update();
   composer.render();
 }
