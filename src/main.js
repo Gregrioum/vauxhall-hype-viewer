@@ -16,6 +16,7 @@ import './style.css';
 const FOCAL_AUTO_ORBIT = 80; // mm (default while rotating)
 const FOCAL_FREE_BROWSE = 50; // mm (free browsing)
 const SENSOR_WIDTH_MM = 36; // Full-frame 36mm matching Blender cameras
+const REAR_BLOOM_SCALE = 0.1; // Tight, restrained 10% selective rear-lamp bloom
 
 // Additive selective-bloom composite pass (blends ONLY the rear-lamp bloom pass onto the main scene!)
 const SelectiveBloomCompositeShader = {
@@ -374,7 +375,8 @@ renderPass.clearAlpha = 0;
 composer.addPass(renderPass);
 
 const selectiveBloomBlendPass = new ShaderPass(SelectiveBloomCompositeShader);
-selectiveBloomBlendPass.uniforms.tBloom.value = rearBloomComposer.renderTarget2.texture;
+// Sample UnrealBloomPass's pure blurred halo target (zero double-added sharp LED pixels!)
+selectiveBloomBlendPass.uniforms.tBloom.value = bloomPass.renderTargetsHorizontal[0].texture;
 composer.addPass(selectiveBloomBlendPass);
 
 const outputPass = new OutputPass();
@@ -740,7 +742,7 @@ function updateRearHaloVisibility() {
     0.0,
     1.0
   );
-  const haloPeak = 0.27;
+  const haloPeak = 0.27 * REAR_BLOOM_SCALE;
 
   for (const sp of rearHaloSprites) {
     sp.visible = rearViewFactor > 0.01;
@@ -786,17 +788,18 @@ function updateRearLampBloom(progress) {
     rearLensMat.emissiveIntensity = THREE.MathUtils.lerp(0.0, isDark ? 4.0 : 4.5, glow);
   }
 
-  // 3. Selective Rear-Lamp-Only HDR Bloom in Dark Studio (0% bloom on any other car part!)
+  // 3. Selective Rear-Lamp-Only HDR Bloom in Dark Studio (scaled cleanly by REAR_BLOOM_SCALE)
   if (isDark) {
-    selectiveBloomBlendPass.uniforms.uBloomStrength.value = glow;
+    selectiveBloomBlendPass.uniforms.uBloomStrength.value = glow * REAR_BLOOM_SCALE;
     bloomPass.strength = THREE.MathUtils.lerp(0.0, 0.52, glow);
-    bloomPass.radius = THREE.MathUtils.lerp(0.2, 0.52, glow);
+    bloomPass.radius = THREE.MathUtils.lerp(0.18, 0.42, glow);
   } else {
     selectiveBloomBlendPass.uniforms.uBloomStrength.value = 0.0;
   }
 
-  // 4. Subtle crimson bounce lights on rear diffuser & open flaps
-  const bouncePeak = isDark ? 6.0 : 4.5;
+  // 4. Subtle crimson bounce lights on rear diffuser & open flaps (scaled softly with bloom)
+  const bounceScale = THREE.MathUtils.lerp(0.35, 1.0, Math.min(REAR_BLOOM_SCALE, 1.0));
+  const bouncePeak = (isDark ? 6.0 : 4.5) * bounceScale;
   for (const pl of rearBounceLights) {
     pl.intensity = bouncePeak * glow * pl.userData.mult;
   }
