@@ -17,6 +17,34 @@ const FOCAL_AUTO_ORBIT = 80; // mm (default while rotating)
 const FOCAL_FREE_BROWSE = 50; // mm (free browsing)
 const SENSOR_WIDTH_MM = 36; // Full-frame 36mm matching Blender cameras
 
+// Additive selective-bloom composite pass (blends ONLY the rear-lamp bloom pass onto the main scene!)
+const SelectiveBloomCompositeShader = {
+  uniforms: {
+    tDiffuse: { value: null },
+    tBloom: { value: null },
+    uBloomStrength: { value: 0.0 },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform sampler2D tBloom;
+    uniform float uBloomStrength;
+    varying vec2 vUv;
+
+    void main() {
+      vec4 base = texture2D(tDiffuse, vUv);
+      vec3 bloom = texture2D(tBloom, vUv).rgb * uBloomStrength;
+      gl_FragColor = vec4(base.rgb + bloom, base.a);
+    }
+  `,
+};
+
 // Blender "AgX - Very High Contrast" filmic S-curve look pass (preserves alpha for White Studio shadows!)
 const AgXContrastShader = {
   uniforms: {
@@ -308,7 +336,30 @@ setCameraFromSpherical(
   CAMERA_PRESETS.front34.target
 );
 
-// Post-processing Composer (HalfFloat + MSAA + whisper bloom + AgX Very High Contrast look)
+// 1. Dedicated Selective-Bloom Composer (renders ONLY the rear red lamps occluded by pitch-black car body!)
+const bloomRenderTarget = new THREE.WebGLRenderTarget(
+  Math.max(1, Math.floor(window.innerWidth / 2)),
+  Math.max(1, Math.floor(window.innerHeight / 2)),
+  { type: THREE.HalfFloatType }
+);
+const rearBloomComposer = new EffectComposer(renderer, bloomRenderTarget);
+rearBloomComposer.renderToScreen = false;
+const rearBloomRenderPass = new RenderPass(scene, camera);
+rearBloomRenderPass.clearAlpha = 1;
+rearBloomComposer.addPass(rearBloomRenderPass);
+
+const bloomPass = new UnrealBloomPass(
+  new THREE.Vector2(
+    Math.max(1, Math.floor(window.innerWidth / 2)),
+    Math.max(1, Math.floor(window.innerHeight / 2))
+  ),
+  0.55, // Selective bloom strength on rear lamps ONLY
+  0.48, // Tight crisp halo radius
+  0.35 // Low threshold since ONLY rear red lamps are non-black in this pass!
+);
+rearBloomComposer.addPass(bloomPass);
+
+// 2. Main Scene Composer (ZERO global bloom on car body — composites ONLY selective rear-lamp bloom!)
 const renderTarget = new THREE.WebGLRenderTarget(
   window.innerWidth,
   window.innerHeight,
@@ -322,19 +373,22 @@ const renderPass = new RenderPass(scene, camera);
 renderPass.clearAlpha = 0;
 composer.addPass(renderPass);
 
-const bloomPass = new UnrealBloomPass(
-  new THREE.Vector2(window.innerWidth, window.innerHeight),
-  STUDIO_PROFILES.dark.bloomStrength,
-  STUDIO_PROFILES.dark.bloomRadius,
-  STUDIO_PROFILES.dark.bloomThreshold
-);
-composer.addPass(bloomPass);
+const selectiveBloomBlendPass = new ShaderPass(SelectiveBloomCompositeShader);
+selectiveBloomBlendPass.uniforms.tBloom.value = rearBloomComposer.renderTarget2.texture;
+composer.addPass(selectiveBloomBlendPass);
 
 const outputPass = new OutputPass();
 composer.addPass(outputPass);
 
 const contrastPass = new ShaderPass(AgXContrastShader);
 composer.addPass(contrastPass);
+
+// Black depth-occluder material used during the selective rear-lamp bloom pass
+const blackOccluderMat = new THREE.MeshBasicMaterial({
+  color: 0x000000,
+  side: THREE.DoubleSide,
+});
+const nonRearLampMeshes = []; // populated on GLB load for zero-allocation selective bloom swap
 
 // ============================================================================
 // Studio Lighting, Interior Fill & Ground Shadow Planes
@@ -625,11 +679,6 @@ function applyStudio(studioName) {
   rimLight.intensity = profile.rimLightIntensity;
   cabinLight.intensity = profile.cabinLightIntensity;
 
-  bloomPass.enabled = profile.bloomEnabled;
-  bloomPass.threshold = profile.bloomThreshold;
-  bloomPass.strength = profile.bloomStrength;
-  bloomPass.radius = profile.bloomRadius;
-
   contrastPass.enabled = profile.contrastEnabled;
   contrastPass.uniforms.uContrast.value = profile.contrast;
   contrastPass.uniforms.uShadowToe.value = profile.shadowToe;
@@ -679,27 +728,24 @@ let lastRearGlow = 0;
 
 function updateRearHaloVisibility() {
   const glow = lastRearGlow;
-  if (glow <= 0.005) {
+  const isDark = currentStudio === 'dark';
+  // In Dark Studio we use true pixel-accurate selective bloom (rearBloomComposer), so hide sprites!
+  // In Light Studio (transparent white shadow canvas) we use the soft crimson halo sprites!
+  if (isDark || glow <= 0.005) {
     for (const sp of rearHaloSprites) sp.visible = false;
     return;
   }
-  // Smoothly fade sprites off only when camera is looking straight from the front nose
   const rearViewFactor = THREE.MathUtils.clamp(
     THREE.MathUtils.mapLinear(camera.position.z, 2.2, -0.8, 0.0, 1.0),
     0.0,
     1.0
   );
-  const isDark = currentStudio === 'dark';
-  const haloPeak = isDark ? 0.26 : 0.27;
+  const haloPeak = 0.27;
 
   for (const sp of rearHaloSprites) {
     sp.visible = rearViewFactor > 0.01;
-    sp.material.blending = isDark ? THREE.AdditiveBlending : THREE.NormalBlending;
-    if (isDark) {
-      sp.material.color.setRGB(1.8, 0.04, 0.015);
-    } else {
-      sp.material.color.setRGB(1.1, 0.04, 0.02);
-    }
+    sp.material.blending = THREE.NormalBlending;
+    sp.material.color.setRGB(1.1, 0.04, 0.02);
     sp.material.opacity = haloPeak * glow * rearViewFactor * sp.userData.mult;
   }
 }
@@ -718,10 +764,10 @@ function updateRearLampBloom(progress) {
       rearLedMat.color.setRGB(THREE.MathUtils.lerp(0.18, 0.85, glow), 0.0, 0.0);
       rearLedMat.emissive.setRGB(
         1.0,
-        THREE.MathUtils.lerp(0.005, 0.05, glow),
-        THREE.MathUtils.lerp(0.0, 0.015, glow)
+        THREE.MathUtils.lerp(0.005, 0.035, glow),
+        THREE.MathUtils.lerp(0.0, 0.01, glow)
       );
-      rearLedMat.emissiveIntensity = THREE.MathUtils.lerp(0.45, 45.0, glow);
+      rearLedMat.emissiveIntensity = THREE.MathUtils.lerp(0.45, 16.0, glow);
     } else {
       rearLedMat.color.setRGB(THREE.MathUtils.lerp(0.22, 0.9, glow), 0.0, 0.0);
       rearLedMat.emissive.setRGB(
@@ -736,24 +782,26 @@ function updateRearLampBloom(progress) {
   // 2. Illuminate the outer translucent red lens housing (LIGHT LENS PLASTIC - red)
   const rearLensMat = namedMaterials.get('LIGHT LENS PLASTIC - red');
   if (rearLensMat && rearLensMat.emissive) {
-    rearLensMat.emissive.setRGB(1.0, 0.012, 0.003);
-    rearLensMat.emissiveIntensity = THREE.MathUtils.lerp(0.0, isDark ? 8.0 : 4.5, glow);
+    rearLensMat.emissive.setRGB(1.0, 0.01, 0.002);
+    rearLensMat.emissiveIntensity = THREE.MathUtils.lerp(0.0, isDark ? 4.0 : 4.5, glow);
   }
 
-  // 3. Controlled HDR Bloom in Dark Studio (50% reduced — crisp red glow without overpower)
+  // 3. Selective Rear-Lamp-Only HDR Bloom in Dark Studio (0% bloom on any other car part!)
   if (isDark) {
-    bloomPass.threshold = THREE.MathUtils.lerp(4.0, 6.5, glow);
-    bloomPass.strength = THREE.MathUtils.lerp(0.024, 0.21, glow);
-    bloomPass.radius = THREE.MathUtils.lerp(0.14, 0.44, glow);
+    selectiveBloomBlendPass.uniforms.uBloomStrength.value = glow;
+    bloomPass.strength = THREE.MathUtils.lerp(0.0, 0.52, glow);
+    bloomPass.radius = THREE.MathUtils.lerp(0.2, 0.52, glow);
+  } else {
+    selectiveBloomBlendPass.uniforms.uBloomStrength.value = 0.0;
   }
 
-  // 4. Subtle crimson bounce lights on rear diffuser & open flaps (50% reduced)
-  const bouncePeak = isDark ? 6.5 : 4.5;
+  // 4. Subtle crimson bounce lights on rear diffuser & open flaps
+  const bouncePeak = isDark ? 6.0 : 4.5;
   for (const pl of rearBounceLights) {
     pl.intensity = bouncePeak * glow * pl.userData.mult;
   }
 
-  // 5. Update feathered optical crimson bloom sprites
+  // 5. Update feathered optical crimson bloom sprites (used in Light Studio)
   for (const sp of rearHaloSprites) {
     const scaleBoost = THREE.MathUtils.lerp(0.7, 1.0, glow);
     const [bx, by, bz] = sp.userData.baseScale;
@@ -1027,10 +1075,15 @@ async function initAssets() {
 
       const mats = Array.isArray(child.material) ? child.material : [child.material];
       let isGlassMesh = false;
+      let isRearLampMesh = false;
 
       mats.forEach((mat) => {
         if (!mat) return;
         namedMaterials.set(mat.name, mat);
+
+        if (mat.name === 'odi_LIGHT_rear_v1.1' || mat.name === 'LIGHT LENS PLASTIC - red') {
+          isRearLampMesh = true;
+        }
 
         // Attach high-contrast automotive Fresnel car paint shader
         if (
@@ -1101,6 +1154,32 @@ async function initAssets() {
       if (isGlassMesh) {
         child.renderOrder = 2; // Render glass cleanly over interior cockpit
       }
+
+      // Build per-mesh bloom-pass material override so ONLY rear red lamps emit in rearBloomComposer
+      // (handles both single-material and multi-material meshes cleanly!)
+      if (Array.isArray(child.material)) {
+        const hasAnyNonRear = child.material.some(
+          (m) => !m || (m.name !== 'odi_LIGHT_rear_v1.1' && m.name !== 'LIGHT LENS PLASTIC - red')
+        );
+        if (hasAnyNonRear) {
+          const bloomOverride = child.material.map((m) =>
+            m && (m.name === 'odi_LIGHT_rear_v1.1' || m.name === 'LIGHT LENS PLASTIC - red')
+              ? m
+              : blackOccluderMat
+          );
+          nonRearLampMeshes.push({
+            mesh: child,
+            originalMaterial: child.material,
+            bloomMaterial: bloomOverride,
+          });
+        }
+      } else if (!isRearLampMesh) {
+        nonRearLampMeshes.push({
+          mesh: child,
+          originalMaterial: child.material,
+          bloomMaterial: blackOccluderMat,
+        });
+      }
     });
 
     scene.add(carRoot);
@@ -1152,12 +1231,15 @@ initAssets();
 function onResize() {
   const w = window.innerWidth;
   const h = window.innerHeight;
+  const bw = Math.max(1, Math.floor(w / 2));
+  const bh = Math.max(1, Math.floor(h / 2));
   camera.aspect = w / h;
   camera.fov = focalLengthToVFov(currentFocalMm, camera.aspect);
   camera.updateProjectionMatrix();
   renderer.setSize(w, h);
   composer.setSize(w, h);
-  bloomPass.setSize(w, h);
+  rearBloomComposer.setSize(bw, bh);
+  bloomPass.setSize(bw, bh);
 }
 window.addEventListener('resize', onResize);
 
@@ -1268,6 +1350,26 @@ function animate() {
 
   updateRearHaloVisibility();
   controls.update();
+
+  // Selective bloom pass: render ONLY the rear red lamps (with rest of car as black depth occluders)
+  if (currentStudio === 'dark' && lastRearGlow > 0.002) {
+    const savedEnv = scene.environment;
+    const savedFloorVis = darkFloor.visible;
+    scene.environment = null;
+    darkFloor.visible = false;
+    for (let i = 0; i < nonRearLampMeshes.length; i++) {
+      nonRearLampMeshes[i].mesh.material = nonRearLampMeshes[i].bloomMaterial;
+    }
+
+    rearBloomComposer.render();
+
+    for (let i = 0; i < nonRearLampMeshes.length; i++) {
+      nonRearLampMeshes[i].mesh.material = nonRearLampMeshes[i].originalMaterial;
+    }
+    scene.environment = savedEnv;
+    darkFloor.visible = savedFloorVis;
+  }
+
   composer.render();
 }
 
