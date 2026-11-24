@@ -67,78 +67,84 @@ const AgXContrastShader = {
 
 const STUDIO_PROFILES = {
   dark: {
-    exposure: 0.96,
-    envIntensity: 1.38,
-    keyLightIntensity: 0.55,
-    rimLightIntensity: 0.6,
-    cabinLightIntensity: 0.55,
+    // Reverted to v1 Dark Studio car paint & pure AgX shading (with reduced bloom)
+    exposure: 0.84,
+    envIntensity: 0.92,
+    keyLightIntensity: 0.22,
+    rimLightIntensity: 0.0,
+    cabinLightIntensity: 0.12,
     bloomEnabled: true,
-    bloomThreshold: 3.8,
-    bloomStrength: 0.025, // Crisp optical glint — zero hazy fog
+    bloomThreshold: 4.0,
+    bloomStrength: 0.024,
     bloomRadius: 0.14,
-    contrast: 1.1,
-    shadowToe: 0.015,
-    saturation: 1.03,
+    contrastEnabled: false,
+    contrast: 1.0,
+    shadowToe: 0.0,
+    saturation: 1.0,
+    fresnelMode: 0.0, // v1 exact Blender Layer Weight curve
     materials: {
       'METALLIC CARPAINT - columbia blue': {
-        base: [0.22, 0.24, 0.28], // Gleaming metallic silver-steel like v1
-        highlight: [0.95, 0.97, 1.0],
-        metalness: 0.98,
-        roughness: 0.13,
-        clearcoat: 1.0,
-        clearcoatRoughness: 0.015,
-        envMapIntensity: 1.55,
+        base: [0.14, 0.15, 0.17],
+        highlight: [0.88, 0.91, 0.96],
+        metalness: 0.92,
+        roughness: 0.25,
+        clearcoat: 0.8,
+        clearcoatRoughness: 0.045,
+        envMapIntensity: 1.0,
       },
       'SATIN METALLIC CARPAINT - lava': {
-        base: [0.34, 0.014, 0.003],
-        highlight: [0.94, 0.44, 0.3],
-        metalness: 0.96,
-        roughness: 0.16,
-        clearcoat: 0.95,
-        clearcoatRoughness: 0.02,
-        envMapIntensity: 1.45,
+        base: [0.3419, 0.0123, 0.0024],
+        highlight: [0.82, 0.86, 0.92],
+        metalness: 0.93,
+        roughness: 0.26,
+        clearcoat: 0.8,
+        clearcoatRoughness: 0.045,
+        envMapIntensity: 1.0,
       },
       'HYPE_METALLIC CARPAINT - grey': {
-        color: [0.85, 0.89, 0.95],
+        color: [0.76, 0.79, 0.84],
         metalness: 1.0,
-        roughness: 0.09,
-        envMapIntensity: 1.45,
+        roughness: 0.15,
+        envMapIntensity: 1.0,
       },
       'SATIN METALLIC CARPAINT - anthracite': {
-        color: [0.016, 0.018, 0.024],
-        metalness: 0.72,
-        roughness: 0.17,
-        envMapIntensity: 1.35,
+        color: [0.01, 0.011, 0.014],
+        metalness: 0.55,
+        roughness: 0.28,
+        envMapIntensity: 1.0,
       },
       'GLASS - windshield': {
-        color: [0.001, 0.0012, 0.002], // Deep dark smoked glass
-        metalness: 0.08,
-        roughness: 0.016,
-        opacity: 0.9,
+        color: [0.0004, 0.0006, 0.001], // 97.5% linear opacity (true ~95-98% dark tint after sRGB gamma)
+        metalness: 0.1,
+        roughness: 0.022,
+        opacity: 0.975,
         envMapIntensity: 1.0,
       },
       'odi_LIGHT_front_v1.1': {
         emissiveIntensity: 3.8,
       },
       'odi_LIGHT_rear_v1.1': {
-        emissiveColor: [1.0, 0.005, 0.0],
+        emissiveColor: [1.0, 0.006, 0.0],
         emissiveIntensity: 4.2,
       },
     },
   },
   white: {
+    // Maintained Light Studio car paint material & contrast
     exposure: 0.94,
     envIntensity: 1.12,
     keyLightIntensity: 1.4,
     rimLightIntensity: 0.5,
-    cabinLightIntensity: 0.85,
+    cabinLightIntensity: 0.18,
     bloomEnabled: false,
     bloomThreshold: 5.0,
     bloomStrength: 0.0,
     bloomRadius: 0.1,
+    contrastEnabled: true,
     contrast: 1.08,
     shadowToe: 0.012,
     saturation: 1.03,
+    fresnelMode: 1.0, // Light Studio sculpted metallic flop
     materials: {
       'METALLIC CARPAINT - columbia blue': {
         base: [0.18, 0.23, 0.32],
@@ -171,11 +177,11 @@ const STUDIO_PROFILES = {
         envMapIntensity: 1.0,
       },
       'GLASS - windshield': {
-        color: [0.001, 0.0012, 0.002], // Deep dark smoked glass
+        color: [0.0004, 0.0006, 0.001], // 97.5% linear opacity (true ~95-98% dark tint after sRGB gamma)
         metalness: 0.06,
         roughness: 0.015,
-        opacity: 0.89,
-        envMapIntensity: 0.78,
+        opacity: 0.975,
+        envMapIntensity: 0.8,
       },
       'odi_LIGHT_front_v1.1': {
         emissiveIntensity: 4.5,
@@ -502,40 +508,48 @@ let wheelTimeout = null;
 let activeCameraTween = null;
 
 // ============================================================================
-// High-Contrast Automotive Fresnel Metallic Car-Paint Shader Hook
+// Dual-Studio Fresnel Metallic Car-Paint Shader Hook
+//   uFresnelMode = 0.0 -> Exact v1 Dark Studio Blender Layer Weight curve
+//   uFresnelMode = 1.0 -> Light Studio sculpted metallic flop curve
 // ============================================================================
 function attachBlenderFresnelPaint(material, initialBase, initialHighlight) {
   const uniforms = {
     uCarBaseColor: { value: new THREE.Color(...initialBase) },
     uCarHighlightTint: { value: new THREE.Color(...initialHighlight) },
+    uFresnelMode: { value: 0.0 },
   };
   fresnelUniforms.set(material.name, uniforms);
 
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uCarBaseColor = uniforms.uCarBaseColor;
     shader.uniforms.uCarHighlightTint = uniforms.uCarHighlightTint;
+    shader.uniforms.uFresnelMode = uniforms.uFresnelMode;
 
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
         `#include <common>
         uniform vec3 uCarBaseColor;
-        uniform vec3 uCarHighlightTint;`
+        uniform vec3 uCarHighlightTint;
+        uniform float uFresnelMode;`
       )
       .replace(
         '#include <lights_fragment_begin>',
         `{
           float ndotv = clamp(abs(dot(normalize(normal), normalize(vViewPosition))), 0.0, 1.0);
-          // Sculptural metallic flop: deep rich base on facing planes, crisp metallic highlight along grazing curves
-          float lwFacing = 1.0 - pow(ndotv, 0.55);
-          float rampT = smoothstep(0.28, 0.90, lwFacing);
-          float mixFac = 0.58 * rampT;
+          // Mode 0 (Dark Studio v1): exact Blender Layer Weight (blend=0.5) -> ColorRamp(0.25..0.88 -> 0..0.48)
+          float lwV1 = 1.0 - sqrt(ndotv);
+          float mixV1 = 0.48 * clamp((lwV1 - 0.25) / (0.88 - 0.25), 0.0, 1.0);
+          // Mode 1 (Light Studio): sculpted high-contrast metallic flop
+          float lwLight = 1.0 - pow(ndotv, 0.55);
+          float mixLight = 0.58 * smoothstep(0.28, 0.90, lwLight);
+          float mixFac = mix(mixV1, mixLight, uFresnelMode);
           diffuseColor.rgb = mix(uCarBaseColor, uCarHighlightTint, mixFac);
         }
         #include <lights_fragment_begin>`
       );
   };
-  material.customProgramCacheKey = () => `blender-fresnel-hc-${material.name}`;
+  material.customProgramCacheKey = () => `blender-fresnel-dual-${material.name}`;
   material.needsUpdate = true;
 }
 
@@ -577,6 +591,7 @@ function applyStudio(studioName) {
   bloomPass.strength = profile.bloomStrength;
   bloomPass.radius = profile.bloomRadius;
 
+  contrastPass.enabled = profile.contrastEnabled;
   contrastPass.uniforms.uContrast.value = profile.contrast;
   contrastPass.uniforms.uShadowToe.value = profile.shadowToe;
   contrastPass.uniforms.uSaturation.value = profile.saturation;
@@ -590,6 +605,7 @@ function applyStudio(studioName) {
       const u = fresnelUniforms.get(matName);
       u.uCarBaseColor.value.setRGB(...cfg.base);
       u.uCarHighlightTint.value.setRGB(...cfg.highlight);
+      u.uFresnelMode.value = profile.fresnelMode;
       mat.color.setRGB(...cfg.base);
     } else if (cfg.color) {
       mat.color.setRGB(...cfg.color);
@@ -891,14 +907,14 @@ async function initAssets() {
           attachBlenderFresnelPaint(mat, prof.base, prof.highlight);
         }
 
-        // Deep dark-tinted smoked automotive glass (89–90% opacity)
+        // Ultra-dark smoked automotive glass (97.5% linear opacity -> true 95-98% visual tint)
         if (mat.name === 'GLASS - windshield' || mat.name === 'odi_GLASS_reflection_v1.1') {
           isGlassMesh = true;
           mat.transparent = true;
-          mat.opacity = 0.9;
-          mat.color.setRGB(0.001, 0.0012, 0.002);
-          mat.roughness = 0.016;
-          mat.metalness = 0.08;
+          mat.opacity = 0.975;
+          mat.color.setRGB(0.0004, 0.0006, 0.001);
+          mat.roughness = 0.022;
+          mat.metalness = 0.1;
           if ('clearcoat' in mat) {
             mat.clearcoat = 1.0;
             mat.clearcoatRoughness = 0.01;
@@ -906,7 +922,7 @@ async function initAssets() {
           if ('ior' in mat) mat.ior = 1.52;
           if ('reflectivity' in mat) mat.reflectivity = 1.0;
           mat.depthWrite = false;
-          mat.side = THREE.FrontSide;
+          mat.side = THREE.DoubleSide; // Preserve Blender doubleSided so side windows aren't backface-culled!
           mat.needsUpdate = true;
         }
 
