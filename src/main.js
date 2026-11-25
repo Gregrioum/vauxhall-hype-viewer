@@ -270,6 +270,8 @@ const aeroScrubber = document.getElementById('aero-scrubber');
 const aeroPct = document.getElementById('aero-pct');
 const btnOrbitToggle = document.getElementById('btn-orbit-toggle');
 const labelOrbit = document.getElementById('label-orbit');
+const btnUiMinimize = document.getElementById('btn-ui-minimize');
+const btnUiRestore = document.getElementById('btn-ui-restore');
 const lensLabel = document.getElementById('lens-label');
 const modeLabel = document.getElementById('mode-label');
 const modeDot = document.getElementById('mode-dot');
@@ -297,7 +299,9 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
 
 function focalLengthToVFov(focalMm, aspect) {
-  const effectiveAspect = Math.max(aspect, 0.72);
+  // Match Blender 36mm horizontal sensor on landscape; on portrait mobile, widen vertical FOV
+  // smoothly so the entire 5.6m car stays framed cleanly between the top and bottom HUD!
+  const effectiveAspect = aspect < 1.0 ? Math.max(aspect, 0.44) : aspect;
   const sensorH = SENSOR_WIDTH_MM / effectiveAspect;
   return THREE.MathUtils.radToDeg(2 * Math.atan(sensorH / (2 * focalMm)));
 }
@@ -970,6 +974,15 @@ presetButtons.forEach((btn) => {
   });
 });
 
+let isUiMinimized = false;
+function setUiMinimized(minimized) {
+  isUiMinimized = minimized;
+  document.body.classList.toggle('ui-minimized', isUiMinimized);
+}
+
+btnUiMinimize.addEventListener('click', () => setUiMinimized(true));
+btnUiRestore.addEventListener('click', () => setUiMinimized(false));
+
 window.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') return;
   if (e.code === 'Space') {
@@ -981,6 +994,8 @@ window.addEventListener('keydown', (e) => {
     setAutoRotate(!isAutoRotating);
   } else if (e.key === 't' || e.key === 'T') {
     applyStudio(currentStudio === 'dark' ? 'white' : 'dark');
+  } else if (e.key === 'h' || e.key === 'H') {
+    setUiMinimized(!isUiMinimized);
   }
 });
 

@@ -374,6 +374,75 @@ body {
   border-color: transparent;
 }
 
+.ctrl-btn.icon-only {
+  padding: 8px;
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
+.ctrl-btn.icon-only:hover {
+  color: var(--text-primary);
+}
+
+/* Minimized UI State & Floating Restore Pill */
+.hud-restore-pill {
+  position: fixed;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%) translateY(18px);
+  z-index: 26;
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 8px 15px;
+  border-radius: 999px;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.2s ease;
+}
+
+.hud-restore-pill:hover {
+  background: var(--surface-hover);
+}
+
+.hud-dock,
+.camera-presets {
+  transition: opacity 0.25s ease, transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.35s ease, border-color 0.35s ease;
+}
+
+body.ui-minimized .hud-dock {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(28px);
+}
+
+body.ui-minimized .camera-presets {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-14px);
+}
+
+body.ui-minimized .interaction-hint {
+  opacity: 0;
+}
+
+body.ui-minimized .hud-restore-pill {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+
 /* Aero Scrubber */
 .scrubber-wrap {
   display: flex;
@@ -427,38 +496,161 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Responsive */
-@media (max-width: 880px) {
-  .hud-top {
-    top: 14px;
-    left: 14px;
-    right: 14px;
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
+/* Responsive — Tablets & Compact Desktop */
+@media (max-width: 960px) {
   .brand-sub {
-    display: none;
-  }
-
-  .hud-dock {
-    bottom: 14px;
-    flex-wrap: wrap;
-    justify-content: center;
-    padding: 8px;
-    gap: 6px;
-    border-radius: 16px;
-  }
-
-  .dock-divider {
     display: none;
   }
 
   .scrubber-wrap {
     display: none;
   }
+}
+
+/* Responsive — Mobile Phones (Portrait & Narrow Screens) */
+@media (max-width: 680px) {
+  .hud-top {
+    top: max(10px, env(safe-area-inset-top));
+    left: 12px;
+    right: 12px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .brand-block {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .brand-kicker {
+    display: none;
+  }
+
+  .brand-title {
+    font-size: 16px;
+    letter-spacing: 0.14em;
+  }
+
+  .camera-readout {
+    margin-top: 0;
+    padding: 3px 8px;
+    font-size: 10px;
+    gap: 5px;
+  }
+
+  .camera-presets {
+    align-self: flex-start;
+    padding: 2px;
+    gap: 2px;
+  }
+
+  .preset-btn {
+    font-size: 10.5px;
+    padding: 4px 9px;
+  }
 
   .interaction-hint {
+    display: none;
+  }
+
+  .hud-dock {
+    bottom: max(10px, env(safe-area-inset-bottom));
+    padding: 5px 6px;
+    gap: 5px;
+    border-radius: 14px;
+    flex-wrap: wrap;
+    justify-content: center;
+    width: calc(100vw - 20px);
+    max-width: 420px;
+  }
+
+  .dock-group {
+    gap: 4px;
+  }
+
+  .dock-divider {
+    display: none;
+  }
+
+  .studio-group {
+    padding: 2px;
+    border-radius: 9px;
+  }
+
+  .seg-btn {
+    font-size: 10.5px;
+    padding: 5px 8px;
+    gap: 4px;
+    border-radius: 7px;
+  }
+
+  .seg-btn svg,
+  .ctrl-btn svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  .ctrl-btn {
+    font-size: 10.5px;
+    padding: 5.5px 9px;
+    gap: 5px;
+    border-radius: 9px;
+  }
+
+  .ctrl-btn.icon-only {
+    padding: 5.5px 7px;
+  }
+
+  .hud-restore-pill {
+    bottom: max(12px, env(safe-area-inset-bottom));
+    font-size: 11px;
+    padding: 6px 12px;
+  }
+}
+
+/* Responsive — Short Landscape Mobile Screens */
+@media (max-height: 480px) {
+  .hud-top {
+    top: 8px;
+    left: 12px;
+    right: 12px;
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .brand-kicker,
+  .brand-sub,
+  .camera-readout {
+    display: none;
+  }
+
+  .brand-title {
+    font-size: 15px;
+  }
+
+  .preset-btn {
+    font-size: 10.5px;
+    padding: 4px 8px;
+  }
+
+  .hud-dock {
+    bottom: 8px;
+    padding: 4px 6px;
+    gap: 5px;
+    border-radius: 12px;
+  }
+
+  .seg-btn,
+  .ctrl-btn {
+    font-size: 10.5px;
+    padding: 5px 8px;
+  }
+
+  .interaction-hint,
+  .scrubber-wrap {
     display: none;
   }
 }

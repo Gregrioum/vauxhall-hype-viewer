@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Vauxhall HYPE — Vision GT 3D Studio</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -126,8 +126,22 @@
           </svg>
           <span id="label-orbit">Auto-Rotate · 80mm</span>
         </button>
+
+        <button id="btn-ui-minimize" class="ctrl-btn icon-only" title="Minimize Controls (H)" aria-label="Minimize Controls">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
       </div>
     </nav>
+
+    <!-- Minimized Floating Restore Pill -->
+    <button id="btn-ui-restore" class="hud-restore-pill" title="Show Controls (H)" aria-label="Show Controls">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="18 15 12 9 6 15" />
+      </svg>
+      <span>Controls</span>
+    </button>
 
     <script type="module" src="/src/main.js"></script>
   </body>
